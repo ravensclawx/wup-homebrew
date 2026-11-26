@@ -11,7 +11,10 @@ void fault(int kind, u32 *regs, u32 spsr) {
     for (int i = 0; i < 13; i++) klog("r%d=%p%s", i, regs[i], i % 4 == 3 ? "\n" : " ");
     klog("\n");
     sched_dump();
-    u16 *fb = (u16 *)REG(0xf0009474u);                   /* (whatever the screen shows: red) */
-    if ((u32)fb >= 0x100000u && (u32)fb < RAM_SIZE) for (u32 i = 0; i < SCREEN_W * SCREEN_H; i++) fb[i] = 0xa000;
+    u16 *fb = (u16 *)FB0_ADDR;                            /* screen 0, RGB565, red, at full brightness (an app may
+                                                             have left the 8-bit screen up, or the screen dark) */
+    for (u32 i = 0; i < SCREEN_W * SCREEN_H; i++) fb[i] = 0xa000;
+    REG(0xf0009470u) = SCREEN_W; REG(0xf0009474u) = FB0_ADDR; REG(0xf00094b0u) = (REG(0xf00094b0u) & ~3u) | 3;
+    for (u32 i = 0; i <= 32; i++) REG(0xf0009600u + 4 * i) = i * 8;
     for (;;) ;
 }

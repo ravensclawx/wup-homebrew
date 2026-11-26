@@ -5,10 +5,18 @@
 u8 input_report[128] __attribute__((aligned(4)));
 volatile u32 input_seq;
 
+/* The Power button (report byte 4, bit 1): the pad off, the screen first, as the stock firmware turns it off. Only
+   after it has been seen up: it may still be held from switching the pad on */
 static void input_task(void *unused) {
     (void)unused;
+    int armed = 0, held = 0;
     for (;;) {
-        if (!uic_poll()) { memcpy(input_report, uic_report, 128); input_seq++; }
+        if (!uic_poll()) {
+            memcpy(input_report, uic_report, 128); input_seq++;
+            int down = (input_report[4] & 0x02) != 0;
+            if (!down) { armed = 1; held = 0; }
+            else if (armed && ++held == 10) power_off();      /* (40 ms down: a press, not a glitch) */
+        }
         sched_sleep(4);
     }
 }

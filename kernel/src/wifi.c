@@ -666,6 +666,16 @@ int wifi_join(const char *ssid, const u8 *pmk) {
     if (!up && wifi_up()) return -1;
     u32 n = strlen(ssid);
     if (!n || n > 32) return -2;
+    static u8 last_pmk[32];
+    if (wifi_state == WIFI_CONNECTED && !strcmp(wifi_ssid, ssid) && secured == (pmk != NULL) &&
+        (!pmk || !memcmp(last_pmk, pmk, 32))) {           /* already on it, with this key: nothing to do. (The radio
+                                                             stays connected from app to app; joining again would wait
+                                                             for a key exchange the network does not redo, and then
+                                                             take the connection for a wrong password) */
+        klog("wifi: already connected to %s\n", ssid);
+        return 0;
+    }
+    if (pmk) memcpy(last_pmk, pmk, 32);
     strcpy(wifi_ssid, ssid);
     secured = pmk != NULL; linked = keyed = 0;
     u32 v = 0;

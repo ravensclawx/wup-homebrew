@@ -43,7 +43,9 @@ static void cache_clean(const void *p, u32 n);
 /* fade in once the app's first frame is on screen (or after 0.3 s, whatever it shows) */
 static int fade_pending; static u32 fade_t0, fade_wait = 300000;
 void wup_screen_hold(void) { fade_wait = 3000000; }
-static void fade_in_now(void) { if (fade_pending) { fade_pending = 0; gfx_fade(0, 256); } }
+static int fade_instant;
+void wup_screen_instant(void) { fade_instant = 1; }  /* (the menu: it appears at once, no fade-in) */
+static void fade_in_now(void) { if (fade_pending) { fade_pending = 0; if (fade_instant) gfx_brightness(256); else gfx_fade(0, 256); } }
 
 __attribute__((noinline)) static void run_on_stack(void (*f)(void), void *top) {
     __asm__ volatile("mov r4, sp\n\tmov sp, %1\n\tblx %0\n\tmov sp, r4\n\t"
@@ -58,6 +60,10 @@ static void app_main(void) {
     /* apps fade in and out: black until the first frame is shown (fade_in_now), fade out on return */
     gfx_brightness(0);
     fade_pending = 1; gfx_present_hook = fade_in_now;
+#ifdef WUP_KERNEL
+    gfx_brightness(0);                                 /* (dark already: the kernel keeps it so between apps) the first
+                                                          frame is drawn unseen, then faded in */
+#endif
     uart_init();
     copy_boot();
     for (int i = 0; i < 4; i++) {                      /* the sticks at rest: each pad's are a little off centre */
@@ -88,7 +94,12 @@ static void app_main(void) {
         LCD(0x100) = 0; LCD(0x104) = 0xff000000u;
         wup_vblank(); LCD(0xb0) = lcd8[0]; LCD(0x70) = lcd8[1]; LCD(0x74) = lcd8[2];
     }
+#ifndef WUP_KERNEL
     gfx_brightness(256);                               /* the normal curve again: the screen is black */
+#else
+    gfx_brightness(0);                                 /* dark until the next app fades in (one layer here, no black
+                                                          firmware screen to switch to) */
+#endif
     if (exec_path[0]) ret = stage_exec() ? 0 : WUP_HANDOFF_RUN;   /* the screen's memory is free now: the next app into it */
 }
 /* The loader jumps here (it must be in the first segment, 0x350000..). A large app's second segment

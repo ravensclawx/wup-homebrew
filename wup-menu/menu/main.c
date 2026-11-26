@@ -224,7 +224,7 @@ int menu_reset(void (*tick)(void)) {
 }
 
 int main(void) {
-    wup_screen_hold();                                 /* (it always presents its first screen: fade in with that, not before) */
+    wup_screen_hold();                                 /* (it always presents its first screen: shown with that, not before) */
     const wup_handoff_t *pb = wup_handoff();
     int resumed = pb && pb->runs > 0;
     if (resumed && (pb->flags & WUP_HO_RADIO_READY)) radio_ready = 1;      /* patched and up already: never twice */

@@ -25,7 +25,7 @@ static int step(void) {
     return st;
 }
 
-int i2c_write(int addr, const u8 *p, int n) {
+static int x_write(int addr, const u8 *p, int n) {
     int err = 0, st;
     C(0x08) = 0x18;
     G(0x04) |= BIT;
@@ -52,7 +52,7 @@ int i2c_write(int addr, const u8 *p, int n) {
 
 /* the address phase alone to `addr`, then STOP (is the device there?). Returns the status word (bit 2: ACK), or -1 when
    nothing came back; *err gets the error register (+0x1C), *bus the bus state (+0x20) first */
-int i2c_probe(int addr, u32 *err, u32 *bus) {
+static int x_probe(int addr, u32 *err, u32 *bus) {
     int st;
     C(0x08) = 0x18;
     G(0x04) |= BIT;
@@ -70,7 +70,7 @@ int i2c_probe(int addr, u32 *err, u32 *bus) {
 /* register `reg` of device `addr`: the register byte written, a repeated START, then n bytes read, the way LVC reads
    the panel's ID (LVC 0xb688-0xb8aa): +0x08 0x14 to receive, 0x34 per byte with ACK, 0x10 then 0x38 for the last
    (no ACK), then STOP */
-int i2c_read(int addr, u8 reg, u8 *p, int n) {
+static int x_read(int addr, u8 reg, u8 *p, int n) {
     int err = 0, st;
     C(0x08) = 0x18;
     G(0x04) |= BIT;
@@ -97,3 +97,11 @@ int i2c_read(int addr, u8 reg, u8 *p, int n) {
     G(0x04) &= ~BIT;
     return err;
 }
+
+/* one task on the bus at a time: the panel (backlight, the Power button's screen-off) and the sound codec share it */
+static int lk = -1;
+static void lock(void) { if (sched_current() >= 0) { if (lk < 0) lk = sem_new(1, 1); sem_wait(lk, -1); } }
+static void unlock(void) { if (sched_current() >= 0 && lk >= 0) sem_signal(lk); }
+int i2c_write(int addr, const u8 *p, int n) { lock(); int r = x_write(addr, p, n); unlock(); return r; }
+int i2c_probe(int addr, u32 *err, u32 *bus) { lock(); int r = x_probe(addr, err, bus); unlock(); return r; }
+int i2c_read(int addr, u8 reg, u8 *p, int n) { lock(); int r = x_read(addr, reg, p, n); unlock(); return r; }

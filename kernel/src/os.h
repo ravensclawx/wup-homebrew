@@ -164,6 +164,8 @@ int i2c_read(int addr, u8 reg, u8 *p, int n);
 /* lcd.c */
 void lcd_init(int pwm, int panel_setup);   /* panel_setup 0: the panel is up already (after a normal boot) */
 void lcd_wait_vblank(void);
+void lcd_off(void);
+void power_off(void);
 void lcd_backlight(int pwm);                    /* the panel's PWM, 0..255 */
 void lcd_show(u32 addr);
 extern volatile u32 vblanks, vblank_us;

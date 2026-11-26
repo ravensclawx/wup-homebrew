@@ -36,7 +36,17 @@ static void k_wifi_hooks(void (*rx)(const u8 *, u32), void (*link)(int)) { wifi_
 
 static int k_uic(const u8 *o, int no, u8 *i, int ni) { return uic_cmd(o, no, i, ni); }
 static void k_backlight(int pwm) { lcd_backlight(pwm < 0 ? 0 : pwm > 255 ? 255 : pwm); }
-static void k_power_off(void) { static const u8 c[2] = { 0x01, 0x04 }; uic_cmd(c, 2, NULL, 0); for (;;) sched_sleep(1000); }
+void power_off(void) {                             /* (also the Power button: input.c) */
+    klog("power off\n");
+    lcd_off();
+    static const u8 c[2] = { 0x01, 0x04 };
+    for (int i = 0;; i++) {                           /* (until the UIC has cut the power) */
+        int e = uic_cmd(c, 2, NULL, 0);
+        if (i < 5) klog("power off: asked (%d)\n", e);
+        sched_sleep(200);
+    }
+}
+static void k_power_off(void) { power_off(); }
 static void k_reboot(void) { klog("reboot asked: ignored (the way out is holding Power)\n"); }
 static int k_flash_write(u32 a, const void *p, u32 n) { return flash_program(a, p, n); }
 static void k_log(const char *s) { klog("%s", s); }

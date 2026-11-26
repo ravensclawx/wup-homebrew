@@ -93,6 +93,7 @@ void wup_audio_close(void);
 /* the app fades in with its first presented frame, or after 0.3 s whatever is on screen; wup_screen_hold()
    waits up to 3 s for that first frame (an app preparing a complete first screen) */
 void wup_screen_hold(void);
+void wup_screen_instant(void);                     /* the first frame appears at once instead of fading in (the menu) */
 
 /* the rumble motor, the screen's brightness and the microphone (all put back when main() returns) */
 void wup_rumble(int on);                             /* the motor on / off (it is one speed) */

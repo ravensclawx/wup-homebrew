@@ -55,29 +55,58 @@ void lcd_init(int pwm, int panel_setup) {
 
     if (!panel_setup) { LCD(0x80) |= 0x10; return; }
 
-    /* LCD power before the panel's reset: under UART boot nothing has powered the LCD yet (in a normal boot it is on
-       when the firmware starts: the panel answers LVC at 0.305 s before any 12 xx). Seen on the pad 2026-11-19: the
-       panel did not answer after the reset alone, and did after 12 01 + 100 ms + the reset. (After a normal boot the
-       12 01 changes nothing.) 0xF0005100 is the panel's reset: the board init drives it low like LVC's, and the panel
-       shows nothing until it is high again (on the pad 2026-11-19: black until this pulse). */
-    uic_lcd_power(1);
-    delay_ms(100);
+    /* The panel as the stock firmware starts it (traced in the emulator, LVC 7677): out of reset at 0.305 s, its ID
+       read and the backlight set at 0.32 s, display off at 0.432 s and at once the LCD's power off (UIC 12 00), then
+       ~25 ms later the backlight, its settings (B8), display on and the LCD's power on (12 01); the picture layer at
+       0.605 s. Without that power cycle the panel showed a line at every power-on (the pad, 2026-11-26). In a normal
+       boot the UIC has the LCD powered already; booted over UART nothing has, and the panel then does not answer
+       until 12 01 and 100 ms (the pad, 2026-11-19): that only as a fallback. */
     pin_pulse(0xf0005100u, 5);                            /* the panel out of reset (LVC: 0.300 s low, 0.305 s high) */
-    delay_ms(10);
-    {   u32 err, bus; int st = i2c_probe(0x39, &err, &bus);
-        klog("lcd: panel %s (status %x)\n", st >= 0 && (st & 4) ? "answers" : "does not answer", (u32)st); }
-    panel_backlight(pwm);                                 /* "[LCD] JDI R69208 Initialize" */
+    delay_ms(15);
+    u32 err, bus; int st = i2c_probe(0x39, &err, &bus);
+    if (st < 0 || !(st & 4)) {
+        uic_lcd_power(1); delay_ms(100);
+        pin_pulse(0xf0005100u, 5); delay_ms(15);
+        st = i2c_probe(0x39, &err, &bus);
+    }
+    klog("lcd: panel %s (status %x)\n", st >= 0 && (st & 4) ? "answers" : "does not answer", (u32)st);
+    panel_backlight(pwm);                                 /* "[LCD] JDI R69208 Initialize" (LVC 0.32 s) */
     pin_pulse(0xf000511cu, 5);                            /* LVC 0.322 s (the camera's reset, inferred) */
     REG(0xf0005114u) = 0xc200; REG(0xf0005118u) = 0xc200; /* LVC 0.338 s: rumble off, and its neighbour */
-    panel(off, 1);                                        /* (LVC's 12 00 here is left out: it would cut the power) */
+    delay_ms(90);                                         /* (LVC sets the camera up here: display off at 0.432 s) */
+    panel(off, 1);
+    uic_lcd_power(0);                                     /* LVC 0.433 s: the LCD's power off ... */
+    delay_ms(25);                                         /* (LVC sets the sound codec up meanwhile) */
+    panel_backlight(pwm);
     panel(open, 2); panel(b8, 6); panel(close, 2);
     panel(on, 1);
-    uic_lcd_power(1);                                     /* (LVC sends 12 01 after the display-on) */
-
-    LCD(0x80) |= 0x10;                                    /* show the UI layer */
+    uic_lcd_power(1);                                     /* ... and on again after the display-on (LVC ~0.46 s) */
+    for (int i = 0; i < 4; i++) lcd_wait_vblank();
+    LCD(0x80) |= 0x10;                                    /* the picture layer last (LVC 0.605 s) */
 }
 
 void lcd_backlight(int pwm) { panel_backlight(pwm); }
+
+/* the screen off the way the stock firmware turns the pad off (LVC; the UIC's 12 00 last, in the emulator's trace of
+   its power-off): black, the panel's display off and asleep, then the LCD's power. A panel that loses its power with
+   a picture on it keeps a ghost of that picture into the next power-on (seen on the pad 2026-11-26) */
+void lcd_off(void) {
+    static const u8 off[] = { 0x28 }, sleep_in[] = { 0x10 };
+    u32 top = LCD(0x200 + 4 * 32) & 0x1ff;                /* the brightness now (256: full), faded to black in 18 frames */
+    for (int f = 17; f >= 0; f--) {
+        for (u32 i = 0; i <= 32; i++) LCD(0x200 + 4 * i) = (i * 8 * top / 256) * (u32)f / 18;
+        lcd_wait_vblank();
+    }
+    lcd_wait_vblank();
+    panel(off, 1);
+    lcd_wait_vblank(); lcd_wait_vblank();
+    panel(sleep_in, 1);
+    klog("power off: panel asleep\n");
+    delay_ms(120);                                        /* (MIPI: sleep-in takes up to 120 ms) */
+    uic_lcd_power(0);
+    klog("power off: LCD power off\n");
+    delay_ms(20);
+}
 
 /* show framebuffer `addr`: the address is set, then the next vertical blank waited for, where the panel takes it.
    Only then is the buffer shown until now free to draw into (waiting first and setting after left the old buffer on

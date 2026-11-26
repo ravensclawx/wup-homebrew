@@ -1,9 +1,8 @@
-/* The Homebrew Menu and its apps, one after another, as the loader ran them on Nintendo's firmware (wup-menu
- * boot/loader.c; the same images, the same hand-off block: libwup/include/handoff.h). The menu comes from its flash
- * slot (0x30000: header {"WMNU", stored size, crc32, inflated size, stamp}, image 0x31000) or from the bundle in the
- * running bank (bank + BUNDLE_OFF + 0x2000: the Wii U install), the newer one; images are app images (wupfmt.h),
- * usually deflated (tinf). An app that returns WUP_HANDOFF_RUN has staged the next one; after any other the menu is
- * loaded again, also after the menu itself ends: the way out is holding Power (the choice is at power-on). */
+/* The Homebrew Menu and its apps, one after another (the hand-off block: libwup/include/handoff.h). The menu comes
+ * from the kernel's menu slot (0xB2000: header {"WMNU", stored size, crc32, inflated size, stamp}, image 0xB3000);
+ * images are app images (wupfmt.h), usually deflated (tinf), inflated straight into the app block (wup_ram.h). An app
+ * that returns WUP_HANDOFF_RUN has staged the next one; after any other the menu runs again, also after the menu
+ * itself ends: the way out is holding Power (the choice is at power-on). */
 #include "os.h"
 #include "../../libwup/include/handoff.h"
 #include "../../libwup/include/wupfmt.h"
@@ -12,11 +11,7 @@
 #define MENU_HDR   0x000b2000u              /* the menu built for this kernel (WUP_KERNEL=1; mkflash.py --kernel-menu). Not
                                                 the menu slot at 0x30000: that one is built for Nintendo's firmware (A) */
 #define MENU_END   0x00100000u
-#define BUNDLE_OFF 0x002c9000u                  /* (wup-menu tools/mkflash.py) */
-#define BANK_SIZE  0x00400000u
 #define WMNU       0x554e4d57u
-#define APP_LO     0x00350000u
-#define APP_HI     0x00380000u
 
 typedef struct { u32 hdr, end; u32 h[5]; } menu_at;
 static int menu_header(menu_at *m) {
@@ -28,24 +23,15 @@ static int menu_header(menu_at *m) {
 }
 static int menu_load(volatile wup_handoff_t *pb, const menu_at *m) {
     u32 size = m->h[1];
-    if (flash_read(m->hdr + 0x1000, (void *)WUP_HANDOFF_STAGE, size)) { klog("apps: flash read failed\n"); return 0; }
+    if (size > WUP_HANDOFF_STAGE_MAX || flash_read(m->hdr + 0x1000, (void *)WUP_HANDOFF_STAGE, size)) { klog("apps: flash read failed\n"); return 0; }
     if (crc32((const u8 *)WUP_HANDOFF_STAGE, size) != m->h[2]) { klog("apps: menu CRC mismatch\n"); return 0; }
     pb->stage_size = size; pb->stage_raw = m->h[3];
     return 1;
 }
 static int stage_menu(volatile wup_handoff_t *pb) {
-    static menu_at m[2];
-    u8 sel = 0;
-    flash_read(0xf000, &sel, 1);
-    u32 bank = sel == 1 ? 0x500000u : 0x100000u;
-    m[0].hdr = bank + BUNDLE_OFF + 0x2000; m[0].end = bank + BANK_SIZE;
-    m[1].hdr = MENU_HDR;                   m[1].end = MENU_END;
-    int ok0 = 0, ok1 = menu_header(&m[1]);              /* (not the bundle: its menu is for Nintendo's firmware) */
-    (void)menu_header;
-    if (!ok0 && !ok1) { klog("apps: no menu in flash\n"); return 0; }
-    int first = ok0 && (!ok1 || m[0].h[4] >= m[1].h[4]) ? 0 : 1;
-    if ((first ? ok1 : ok0) && menu_load(pb, &m[first])) return 1;
-    return (first ? ok0 : ok1) && menu_load(pb, &m[!first]);
+    static menu_at m = { MENU_HDR, MENU_END, { 0 } };
+    if (!menu_header(&m)) { klog("apps: no menu in flash\n"); return 0; }
+    return menu_load(pb, &m);
 }
 
 static void sync_code(u32 a, u32 n) {           /* the written code out of the D-cache, the I-cache dropped */
@@ -53,27 +39,25 @@ static void sync_code(u32 a, u32 n) {           /* the written code out of the D
     __asm__ volatile("mcr p15, 0, %0, c7, c5, 0" :: "r"(0) : "memory");
 }
 
-/* run the staged image; < 0: it is not one */
+/* run the staged image; < 0: it is not one. An app image is one piece, linked at WUP_APP_BASE (libwup's wupbuild.py):
+   its HBRW header first, then code, constants and data; its .bss and heap follow it up to WUP_APP_END */
 static int run_staged(volatile wup_handoff_t *pb) {
     const u8 *img = (const u8 *)WUP_HANDOFF_STAGE;
     u32 len = pb->stage_size;
+    u8 *app = (u8 *)WUP_APP_BASE;
+    if (len > WUP_HANDOFF_STAGE_MAX) { klog("apps: staged image too big\n"); return -1; }
     if (pb->stage_raw) {
         unsigned n = WUP_HANDOFF_WORK_MAX;
-        if (pb->stage_raw > n || tinf_uncompress((void *)WUP_HANDOFF_WORK, &n, img, len) != TINF_OK || n != pb->stage_raw) { klog("apps: inflate failed\n"); return -1; }
-        img = (const u8 *)WUP_HANDOFF_WORK; len = n;
-    }
-    const hb_header2 *h = (const hb_header2 *)img;
-    u32 n1 = len, n2 = 0;
+        if (pb->stage_raw > n || tinf_uncompress(app, &n, img, len) != TINF_OK || n != pb->stage_raw) { klog("apps: inflate failed\n"); return -1; }
+        len = n;
+    } else memmove(app, img, len);
+    const hb_header2 *h = (const hb_header2 *)app;
     if (len < sizeof *h || h->magic != HB_MAGIC) { klog("apps: not an app image\n"); return -1; }
-    if (h->seg2_magic == HB_SEG2_MAGIC) {
-        n1 = h->size; n2 = h->seg2_size;
-        if (n1 > len || n1 + n2 != len || h->seg2_addr < HB_SEG2_START || h->seg2_addr + n2 > HB_SEG2_END) { klog("apps: bad second segment\n"); return -1; }
-    }
-    if (n1 > APP_HI - APP_LO || h->entry < APP_LO || h->entry >= APP_LO + n1) { klog("apps: bad app header\n"); return -1; }
-    u32 a2 = h->seg2_addr, entry = h->entry;
-    klog("apps: running %s\n", (const char *)h->name);
-    if (n2) { memmove((void *)a2, img + n1, n2); sync_code(a2, n2); }   /* (the second segment first: WORK may overlap it) */
-    memmove((void *)APP_LO, img, n1); sync_code(APP_LO, n1);
+    if (h->seg2_magic == HB_SEG2_MAGIC) { klog("apps: %s is built for Nintendo's firmware\n", (const char *)h->name); return -1; }
+    if (h->entry < WUP_APP_BASE || h->entry >= WUP_APP_BASE + len) { klog("apps: bad app header\n"); return -1; }
+    u32 entry = h->entry;
+    klog("apps: running %s (%u KB)\n", (const char *)h->name, len >> 10);
+    sync_code(WUP_APP_BASE, len);
     return ((int (*)(void))entry)();
 }
 

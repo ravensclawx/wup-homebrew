@@ -15,7 +15,14 @@
 #include <stddef.h>
 #include "firmware.h"
 #include "armcpu.h"
+/* (this loader runs on Nintendo's firmware: the old layout's addresses, not the kernel's, wup_ram.h) */
+#define WUP_HANDOFF_ADDR 0x0034f000u
 #include "handoff.h"
+#undef WUP_HANDOFF_STAGE
+#undef WUP_HANDOFF_WORK_MAX
+#define WUP_HANDOFF_STAGE    0x00221400u
+#define WUP_HANDOFF_WORK     0x00190000u
+#define WUP_HANDOFF_WORK_MAX 0x00091400u
 #include "wupfmt.h"
 #include "tinf.h"
 

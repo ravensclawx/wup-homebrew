@@ -1,22 +1,20 @@
-/* The hand-off block between the loader and what it runs (0x34F000, in the loader's 64 KB slot
- * 0x340000..0x350000: uncached, outside every app area).
+/* The hand-off block between the kernel's app runner (kernel/src/app.c) and the apps it runs (WUP_HANDOFF_ADDR,
+ * 0x7F000: just below the app's block, wup_ram.h).
  *
- * The menu is an app like any other. The loader keeps nothing in memory but itself: it puts an app image where
- * it belongs and runs it; when the app returns WUP_HANDOFF_RUN it has staged another image (libwup's wup_exec), which
- * the loader runs next; after any other app the menu is loaded again from its flash slot. So every app owns all
- * of the RAM.
- * A staged image is at WUP_HANDOFF_STAGE (the screen's framebuffer memory: the screen is off then), stage_size bytes,
- * deflated (zlib) when stage_raw is not 0 (its size inflated). The loader inflates it to WUP_HANDOFF_WORK, copies the
- * first segment to 0x350000 and a second to WUP_SPARE (include/wupfmt.h), and calls its entry. */
+ * The menu is an app like any other. Nothing stays in memory between apps but the kernel: each app owns the whole
+ * app block. When an app returns WUP_HANDOFF_RUN it has staged another image (libwup's wup_exec), which runs next;
+ * after any other app the menu runs again from its flash slot.
+ * A staged image waits at WUP_HANDOFF_STAGE (screen 1's memory), stage_size bytes, deflated when stage_raw is not 0
+ * (its size inflated). The kernel inflates it straight into the app block (WUP_APP_BASE) and calls its entry. */
 #pragma once
 #include <stdint.h>
-#define WUP_HANDOFF_ADDR   0x0034f000u
+#include "wup_ram.h"
 #define WUP_HANDOFF_MAGIC  0x42444150u          /* "PADB" */
 #define WUP_HANDOFF_RUN    0x100                /* an app's return value: run the image I staged */
-#define WUP_HANDOFF_STAGE  0x00221400u          /* a staged image (up to 0xD9000 bytes) */
-#define WUP_HANDOFF_WORK   0x00190000u          /* where the loader inflates one (up to 0x91400 bytes) */
-#define WUP_HANDOFF_WORK_MAX 0x00091400u
-#define WUP_HANDOFF_FS_BOUNCE 0x0034e000u       /* 4 KB uncached, DMA-reachable: libwup's flash bounce buffer */
+#define WUP_HANDOFF_STAGE  WUP_STAGE
+#define WUP_HANDOFF_STAGE_MAX WUP_STAGE_MAX
+#define WUP_HANDOFF_WORK_MAX (WUP_APP_END - WUP_APP_BASE)   /* the most an app image may inflate to */
+#define WUP_HANDOFF_FS_BOUNCE WUP_FS_BOUNCE     /* 4 KB, DMA-reachable: libwup's flash bounce buffer */
 enum {
     WUP_HO_RADIO_READY = 1,                     /* the radio is patched and up: the menu skips that step */
     WUP_HO_WIFI_JOINED = 2,                     /* it was associated when the app started */
@@ -25,7 +23,7 @@ enum {
 enum { WUP_UI_SET = 1, WUP_UI_DARK = 2, WUP_UI_QUIET = 4, WUP_UI_24H = 8 };   /* ui: set by the menu; dark appearance; no sound effects; 24-hour clock */
 typedef struct {
     uint32_t magic, version;                /* WUP_HANDOFF_MAGIC, 2 */
-    uint32_t flags, code_size;              /* WUP_HO_*; size of the app image at 0x350000 */
+    uint32_t flags, code_size;              /* WUP_HO_*; size of the app image at WUP_APP_BASE */
     uint32_t menu_sel, runs;                /* home-screen selection to restore; apps started this boot */
     char app_path[64];                      /* "/apps/x.wup" ("" from wuplink) */
     char arg[192];                          /* an argument for the app (e.g. a ROM path); "" = none */

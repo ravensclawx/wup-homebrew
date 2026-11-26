@@ -21,7 +21,12 @@ typedef uint32_t u32; typedef uint8_t u8; typedef uint16_t u16;
 #endif
 
 extern u8 __bss_start[], __bss_end[], __bss2_start[], __bss2_end[];
-static u32 stack[6144] __attribute__((aligned(8), section(".bss.stack")));   /* 24 KB, in the app area */
+#ifdef WUP_KERNEL
+#define STACK_WORDS 16384                              /* 64 KB: the app block has room */
+#else
+#define STACK_WORDS 6144                               /* 24 KB, in the app area */
+#endif
+static u32 stack[STACK_WORDS] __attribute__((aligned(8), section(".bss.stack")));
 static int fs_state, screen_on, lcd8_saved, ret;
 static u32 lcd8[3];
 void wup__kernel_exit(void);
@@ -93,8 +98,10 @@ __attribute__((section(".text.entry"), target("arm"), noinline)) int _wup_entry(
     __asm__ volatile("1: mrc p15, 0, apsr_nzcv, c7, c10, 3\n\tbne 1b\n\t"
                      "mcr p15, 0, %0, c7, c10, 4\n\tmcr p15, 0, %0, c7, c5, 0" :: "r"(0) : "memory", "cc");
     for (u8 *p = __bss_start; p < __bss_end; p++) *p = 0;
+#ifndef WUP_KERNEL
     for (u32 *p = (u32 *)__bss2_start; p < (u32 *)__bss2_end; p++) *p = 0;   /* large apps: .bss in WUP_BIGMEM */
-    run_on_stack(app_main, stack + 6144);
+#endif
+    run_on_stack(app_main, stack + STACK_WORDS);
     mmu_uncache_all();                                 /* back on the loader's stack, outside our pages */
     return ret;
 }
@@ -164,7 +171,14 @@ px_t *wup_screen(void) {
 }
 u8 *wup_screen8(void) {
     if (screen_on) { gfx_end(); screen_on = 0; }
-    if (!lcd8_saved) { lcd8[0] = LCD(0xb0); lcd8[1] = LCD(0x70); lcd8[2] = LCD(0x74); lcd8_saved = 1; }
+    if (!lcd8_saved) { lcd8[0] = LCD(0xb0); lcd8[1] = LCD(0x70); lcd8[2] = LCD(0x74); lcd8_saved = 1;
+#ifdef WUP_KERNEL                                      /* no firmware layer here: our own 8-bit screen (wup_ram.h), the
+                                                          UI layer switched to it the way the stock firmware ran its own
+                                                          (format 0x00FF0008: 8-bit paletted, the stride in bytes) */
+        memset((void *)WUP_FB8, 0, 864u * GFX_H); cache_clean((void *)WUP_FB8, 864u * GFX_H);
+        wup_vblank(); LCD(0x70) = 864; LCD(0x74) = WUP_FB8; LCD(0xb0) = 0x00ff0008u;
+#endif
+    }
     return (u8 *)LCD(0x74);
 }
 u32 wup_stride8(void) { return LCD(0x70); }
@@ -178,7 +192,11 @@ void wup_present8(int y, int h) { u32 s = LCD(0x70); cache_clean((u8 *)LCD(0x74)
    Its PLAY_CNT (+0x20) bit 0 mutes; bit 2 (STOP) wedges an idle engine and is never used. The ring is in the
    loader's slot (uncached, DMA-reachable, unused by the loader while the app runs). */
 #define AU(o) REG(0xf0005400u + (o))
+#ifdef WUP_KERNEL
+#define RING ((int16_t *)WUP_SOUND_RING)                /* the kernel's sound ring (wup_ram.h), the same size */
+#else
 #define RING ((int16_t *)0x00342000u)
+#endif
 #define RFRAMES 11520                                  /* 0.24 s: 0x342000..0x34D000 */
 #define RBYTES (RFRAMES * 4)
 #define LEAD 1600                                      /* a new sound starts this far ahead of the play position (33 ms) */

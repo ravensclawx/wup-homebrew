@@ -172,7 +172,11 @@ void wup_sem_signal(int sem) {
 static struct { void (*fn)(void *); void *arg; u8 *stack; u32 size; int id, done, used, detached; } thr[NTHR];
 static u32 tcb(int id) { u32 t = R32(KER + 0x50); return id >= 1 && id <= R16(t) ? R32(t + 4 * (u32)id) : 0; }
 /* memory only apps use (wup.h): the app area, WUP_SPARE, WUP_BIGMEM. A dormant task whose stack is there is one of ours. */
+#ifdef WUP_KERNEL
+static int app_ram(u32 a) { return a >= WUP_APP_BASE && a < WUP_APP_END; }
+#else
 static int app_ram(u32 a) { return (a >= 0x350000u && a < 0x380000u) || (a >= 0x0da000u && a < 0x136000u) || (a >= 0x190000u && a < 0x2fa400u); }
+#endif
 int wup__kernel_tasks(void) {                      /* (tests) how many kernel tasks apps have made so far */
     u32 tt = R32(KER + 0x50); int n = 0;
     for (int id = 1; id <= (int)R16(tt); id++) { u32 t = tcb(id); if (t && app_ram(R32(t + 0x3c)) && R32(t + 0x38) != 0) n++; }

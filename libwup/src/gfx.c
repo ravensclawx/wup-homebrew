@@ -12,7 +12,12 @@ static u32 host_lcd[0x100];
 #define FB host_fb
 #else
 #define LCD(o) (*(volatile u32 *)(0xf0009400u + (o)))
+#ifdef WUP_KERNEL
+#include "wup_ram.h"
+#define FB ((px_t *)WUP_FB0)                    /* the kernel's screen 0 (wup_ram.h) */
+#else
 #define FB ((px_t *)0x00221400u)
+#endif
 #endif
 static u32 saved[3];
 

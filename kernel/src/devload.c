@@ -4,7 +4,7 @@
  *   the kernel answers "ok\n" (then restarts into it with r0 = HOOK_ARG) or "bad\n" */
 #include "os.h"
 
-#define BUF  0x002fa400u                         /* (free while nothing uses it: below the loader's old slot) */
+#define BUF  WUP_APP_BASE                        /* (the app's block: the running app is being replaced anyway) */
 #define TRAMP 0x003f0000u
 extern char relaunch_code[], relaunch_end[];     /* start.S: copies the image to 0x10000 and jumps to it */
 

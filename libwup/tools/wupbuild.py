@@ -23,6 +23,9 @@ import os, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import paths
 BASE, LIMIT = 0x350000, 0x380000
+if paths.KERNEL:                                         # (the kernel: one flat block, libwup include/wup_ram.h)
+    BASE, LIMIT = 0x080000, 0x253000
+HEAP_MIN = 0x10000                                       # (the kernel: at least this much heap left after .bss)
 NM = paths.NM
 LIB = ([os.path.join(paths.SRC, f) for f in ('wup.c', 'sys.c', 'kernel.c', 'pthread.c', 'time.c', 'atomic.c', 'gfx.c', 'fonts.c', 'mmu.c', 'wup_hw.c', 'fs.c', 'mem.S')]
        + [os.path.join(paths.THIRD, 'littlefs', f) for f in ('lfs.c', 'lfs_util.c')])
@@ -42,7 +45,7 @@ def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, large=None,
     flags = sum((['-I', i] for i in incs), []) + ['-I', paths.INCLUDE,
              *sdk.flags(mode), '-O2', '-isystem', res + '/include', '-isystem', paths.CONFIG, '-fno-common', '-ffunction-sections', '-fdata-sections',
              '-Wall', '-Wno-unused-function', '-ffile-prefix-map=%s=.' % paths.ROOT, '-I', paths.SRC, '-I', paths.THIRD, '-I', paths.GEN,
-             '-DFS_BOUNCE=0x34e000u', *([] if system else ['-DFS_NO_FORMAT']), '-DLFS_NO_DEBUG',   # (only the menu may format)
+             '-DFS_BOUNCE=%s' % ('0x26e800u' if paths.KERNEL else '0x34e000u'), *([] if system else ['-DFS_NO_FORMAT']), '-DLFS_NO_DEBUG',   # (only the menu may format)
              '-DLFS_NO_WARN', '-DLFS_NO_ERROR', '-DLFS_NO_ASSERT', '-DLFS_NO_INTRINSICS',
              '-D_POSIX_MONOTONIC_CLOCK=200112L']     # (libwup has it: <time.h> then names CLOCK_MONOTONIC)
     flags += ['-D' + d for d in list(defs) + os.environ.get('WUP_DEFINES', '').split()] + list(cflags)   # WUP_DEFINES: extra, for test builds
@@ -83,6 +86,8 @@ def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, large=None,
     in_big = ['*%s' % os.path.basename(o) for s, o in zip(lib + srcs, objs) if s in big_text]
     if 'lvgl' in big_text and gui: in_big.append('*liblvgl.a:*')
     if 'bearssl' in big_text and https: in_big.append('*libbearssl.a:*')
+    if paths.KERNEL:                                 # (the kernel: always the one flat image; large, screen8,
+        large, in_big, in_app = False, [], []        #  text_in_big and text_in_app mean nothing there)
     import deps; deps.fetch('tinf'); tinf = os.path.join(deps.DEPS['tinf'][0], 'src')   # tinf: wup_inflate, and big.c's
     for s in [os.path.join(paths.SRC, 'inflate.c'), os.path.join(tinf, 'tinflate.c')] + ([os.path.join(paths.SRC, 'big.c')] if in_big else []):
         o = os.path.join(bdir, os.path.relpath(s, paths.ROOT).replace(os.sep, '_') + '.o')
@@ -139,6 +144,8 @@ def link(objs, bdir, large, name, final=True, net_spare=0, screen8=False, in_app
                            capture_output=True, text=True)
         img = bytearray(open(binf, 'rb').read())[:syms['__bss_start'] - BASE]
         end = syms['__bss_end']
+        if paths.KERNEL and end > LIMIT - HEAP_MIN:
+            sys.exit('%s: too big: .bss reaches 0x%x, the app block ends at 0x%x' % (name, end, LIMIT))
         if end > LIMIT:
             if not final: return None
             sys.exit('%s: too big: .bss reaches 0x%x, the app area ends at 0x%x' % (name, end, LIMIT))
@@ -167,7 +174,10 @@ def link(objs, bdir, large, name, final=True, net_spare=0, screen8=False, in_app
                  (SPARE_END - SPARE - len(seg2)) >> 10, (e2 - syms['__bss2_start']) >> 10, BIG, (lim - e2) >> 10,
                  'in WUP_BIGMEM' if screen8 else 'below the screen'))
     else:
-        print('%s: code+data %d KB, with .bss up to 0x%x (%d KB free of the app area)' % (name, len(img) >> 10, end, (LIMIT - end) >> 10))
+        if paths.KERNEL:
+            print('%s: image %d KB at 0x%x, .bss to 0x%x; heap %d KB' % (name, len(img) >> 10, BASE, end, (LIMIT - end) >> 10))
+        else:
+            print('%s: code+data %d KB, with .bss up to 0x%x (%d KB free of the app area)' % (name, len(img) >> 10, end, (LIMIT - end) >> 10))
     return bytes(img) + seg2, (big if large else b'')
 
 

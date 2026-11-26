@@ -27,6 +27,12 @@
 #include "fs.h"
 #include "handoff.h"
 
+#ifdef WUP_KERNEL
+/* On the wup-homebrew kernel (include/wup_ram.h): the app is one flat block, WUP_APP_BASE..WUP_APP_END (about 1.8 MB):
+   its image, its .bss, then the heap (malloc) to the end. The screens are the kernel's, outside it. */
+#include "wup_ram.h"
+#define WUP_APP_SIZE      (WUP_APP_END - WUP_APP_BASE)
+#else
 #define WUP_APP_BASE      0x00350000u
 #define WUP_APP_SIZE      0x00030000u
 #define WUP_BIGMEM        ((uint8_t *)0x00190000u)
@@ -34,6 +40,7 @@
 #define WUP_BIGMEM_SCREEN (0x00221400u - 0x00190000u)     /* what is left below the RGB565 framebuffer */
 #define WUP_SPARE         ((uint8_t *)0x000da000u)
 #define WUP_SPARE_SIZE    (0x00136000u - 0x000da000u)
+#endif
 
 #define WUP_APP(title) \
     int _wup_entry(void); \

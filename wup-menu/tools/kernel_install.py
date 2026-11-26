@@ -7,12 +7,12 @@
   0xB2000 / 0xB3000   its menu (WUP_KERNEL=1 build: build/apps-kernel/homebrew_menu.wup): header {"WMNU", ...}, the image
   --loader            also the loader (0x10000: X at power-on starts the kernel; boot/loader.c), written last and so
                       that any interruption leaves a pad that boots stock (as menu_install.py loader does)
-  --early             also the early hook (boot/early.c) into Nintendo's firmware in bank 1: X at power-on then starts
+  --early             also the early hook (boot/early.c) into Nintendo's firmware in bank 1: A or Autoboot then starts
                       the kernel before any of Nintendo's drivers. Its two code areas first (unused strings), the
                       branch at LVC 0x40 last: until that one 4-byte change the pad boots as before
 
 Each header is invalidated first and written last: a half-written part is never taken for whole (no kernel: X boots
-stock). Then hold X while powering on. Nothing of Nintendo's and nothing of the A menu is touched."""
+stock). Then hold A while powering on (or turn Autoboot on). Without --early nothing of Nintendo's is touched."""
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import paths
@@ -68,7 +68,7 @@ def main():
                 if new[o:o + 0x1000] != cur[o:o + 0x1000]: g.sector(s0 + o, bytes(new[o:o + 0x1000]))
             if m.flash(fa, len(data), progress=False) != data: sys.exit('EARLY HOOK READ-BACK DIFFERS at 0x%x: install over UART' % fa)
         print('early hook written and verified')
-    print('Done. Power the pad off, then on holding X: the menu on the wup-homebrew kernel. A: the menu as before.')
+    print('Done. Power the pad off, then on: holding A (or with Autoboot on), the menu on the wup-homebrew kernel; otherwise stock.')
 
 
 if __name__ == '__main__':

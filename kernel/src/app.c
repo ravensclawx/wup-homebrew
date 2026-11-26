@@ -3,7 +3,7 @@
  * slot (0x30000: header {"WMNU", stored size, crc32, inflated size, stamp}, image 0x31000) or from the bundle in the
  * running bank (bank + BUNDLE_OFF + 0x2000: the Wii U install), the newer one; images are app images (wupfmt.h),
  * usually deflated (tinf). An app that returns WUP_HANDOFF_RUN has staged the next one; after any other the menu is
- * loaded again. When the menu itself ends, the pad starts Nintendo's firmware again (stock). */
+ * loaded again, also after the menu itself ends: the way out is holding Power (the choice is at power-on). */
 #include "os.h"
 #include "../../libwup/include/handoff.h"
 #include "../../libwup/include/wupfmt.h"
@@ -89,9 +89,8 @@ void apps_run(void *unused) {
         if (r < 0 && menu) break;
         if (!menu) pb->runs++;
         staged = r == WUP_HANDOFF_RUN;
-        if (menu && !staged) { klog("apps: the menu ended\n"); break; }
+        if (menu && !staged) klog("apps: the menu ended: again\n");   /* (the way out is holding Power) */
     }
-    klog("apps: Nintendo's start again\n");
-    sys_reboot();
+    klog("apps: no menu to run\n");
     for (;;) sched_sleep(1000);
 }

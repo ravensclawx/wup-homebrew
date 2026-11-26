@@ -1,6 +1,6 @@
 /* The loader, run at RAM 0x340000 ("CFW1" header). The boot hook (hook.S) loads it and calls it on every normal boot,
  * from the bundle in the running firmware bank (the Wii U install) or from flash 0x10000 (the UART install). It decides whether homebrew runs:
- *   X held at power-on, a system in its slot  -> that system takes the whole pad (takeover below)
+ *   (A or Autoboot with the wup-homebrew kernel installed: the early hook, boot/early.c, has started it already)
  *   A held at power-on                       -> the menu
  *   Autoboot set (the menu's settings)       -> the menu
  *   otherwise                                -> return at once: the stock boot
@@ -108,86 +108,6 @@ static int run_staged(volatile wup_handoff_t *pb) {
     return ((int (*)(void))entry)();
 }
 
-/* ---- a whole system: X at power-on. The slot (0x90000: header {"GPST", size, crc32}, the image from 0x91000 to
-   0xB0000, linked at RAM 0x10000; the free gap, clear of the menu's parts) holds a system that runs the pad on its own:
-   the wup-homebrew kernel (wup-homebrew/kernel), which then runs its own build of the menu. Nintendo's firmware is stopped for good (until the next power-on): interrupts off, the SD host's DMA
-   stopped, the caches cleaned and off, the MMU off; then the image goes to 0x10000 and gets the CPU with r0 = "HOOK".
-   It sets the pad up again itself (its board init, the radio from reset). Without X, or with no valid image, nothing
-   of this happens: the stock boot, or the menu, as always. */
-#define SYS_HDR    0x00090000u
-#define SYS_IMG    0x00091000u
-#define SYS_END    0x000b0000u
-#define SYS_MAGIC  0x54535047u            /* "GPST" */
-#define SYS_RAM    0x00010000u
-#define HOOK_ARG   0x4b4f4f48u            /* "HOOK" */
-static u32 sys_size;
-static int sys_stage(void) {             /* the system to the stage buffer, checked: 0 = there is none */
-    u32 h[4];
-    if (flash_read(SYS_HDR, h, sizeof h) || h[0] != SYS_MAGIC || h[1] < 0x100 || h[1] > SYS_END - SYS_IMG) return 0;
-    if (flash_read(SYS_IMG, (void *)WUP_HANDOFF_STAGE, h[1])) return 0;
-    if (crc32((const u8 *)WUP_HANDOFF_STAGE, h[1]) != h[2]) { dbg("[loader] system CRC mismatch\n"); return 0; }
-    sys_size = h[1];
-    return 1;
-}
-__attribute__((target("arm"), noinline, noreturn)) static void sys_takeover(void) {
-    dbg("[loader] system takeover\n");
-    __asm__ volatile("mrs r0, cpsr\n orr r0, r0, #0xc0\n msr cpsr_c, r0" ::: "r0", "memory");     /* IRQ, FIQ off */
-    *(volatile u8 *)(0xe001002fu) = 1;                 /* the SD host's software reset: its DMA stops (the radio's) */
-    for (int i = 0; i < 100000 && (*(volatile u8 *)(0xe001002fu) & 1); i++) ;
-    __asm__ volatile(
-        "1: mrc p15, 0, apsr_nzcv, c7, c14, 3\n bne 1b\n"     /* clean and invalidate the D-cache */
-        "mcr p15, 0, %0, c7, c10, 4\n"                        /* drain the write buffer */
-        "mrc p15, 0, r0, c1, c0, 0\n"
-        "bic r0, r0, #0x1000\n bic r0, r0, #0x5\n"            /* I-cache, D-cache, MMU off */
-        "mcr p15, 0, r0, c1, c0, 0\n"
-        "mcr p15, 0, %0, c7, c7, 0\n"                         /* both caches invalidated */
-        "mcr p15, 0, %0, c8, c7, 0\n"                         /* TLBs */
-        :: "r"(0) : "r0", "memory", "cc");
-    const u32 *s = (const u32 *)WUP_HANDOFF_STAGE;      /* (RAM is mapped flat: the same addresses with the MMU off) */
-    u32 *d = (u32 *)SYS_RAM;
-    for (u32 i = 0; i < (sys_size + 3) / 4; i++) d[i] = s[i];
-    register u32 arg __asm__("r0") = HOOK_ARG;
-    register u32 to __asm__("r1") = SYS_RAM;
-    __asm__ volatile("bx r1" :: "r"(arg), "r"(to) : "memory");
-    for (;;) ;
-}
-/* The radio, before the takeover. By now Nintendo's driver is loading its firmware into the radio, and a radio taken
-   over in that state answers nothing on its backplane, whatever clock is asked for (seen on the pad, 2026-11-25). So
-   it is reset first, by its own watchdog (chipcommon +0x80 = 1), written through Nintendo's driver's host-side
-   backplane write (the "membytes" iovar: what the menu uses to patch the radio, menu/wifi/wifi_hw.c chip_write). The
-   kernel then finds a chip just reset by its watchdog: the start its radio driver knows (wup-os, proven on the pad). */
-#define DHD     ((int (*)(void *, void *, void *, u32))0x00041517)
-#define DHD_PUB ((void *(*)(void))0x00045965)
-static u32 ioc[7];
-static u8 dbuf[64] __attribute__((aligned(32)));
-static int chip_write32(u32 addr, u32 val) {
-    /* "membytes\0" (9) + addr + size (17 bytes), the data after: placed so that the data lands on a word boundary
-       (the driver copies it 32 bits at a time) */
-    u8 req[17 + 4] __attribute__((aligned(4)));
-    memcpy(req, "membytes", 9); memcpy(req + 9, &addr, 4); u32 n = 4; memcpy(req + 13, &n, 4); memcpy(req + 17, &val, 4);
-    u8 *buf = dbuf + 3;
-    u32 ln = 17 + 4 + 8;
-    memset(buf, 0, ln); memcpy(buf, req, 17 + 4);
-    ioc[0] = 3; ioc[1] = (u32)buf; ioc[2] = ln; ioc[3] = 1; ioc[4] = ioc[5] = ioc[6] = 0;
-    cache_flush(dbuf, sizeof dbuf); cache_flush(ioc, sizeof ioc);
-    int r = DHD(DHD_PUB(), ioc, buf, ln);
-    cache_flush(dbuf, sizeof dbuf);
-    return r;
-}
-static void radio_reset(void) {                        /* (the driver refuses while it is busy loading: tried for 3 s) */
-    int r = -1, t = 0;
-    for (; t < 3000 && (r = chip_write32(0x18000080u, 1)); t += 100) fw_sleep(100);
-    dbg(r ? "[loader] the radio's watchdog: Nintendo's driver refused (error " : "[loader] the radio reset by its watchdog (after ");
-    dbg_hex(r ? (u32)r : (u32)t); dbg(r ? ")\n" : " ms)\n");
-    fw_sleep(50);
-}
-static void sys_work(void) {
-    dbg_init();
-    dbg("[loader] X held: the system in the slot\n");
-    if (sys_stage()) { radio_reset(); sys_takeover(); }
-    dbg("[loader] no system in the slot: the stock boot\n");
-}
-
 /* The firmware's task stack is small (inflating alone needs about 2 KB): the work runs on a stack of our own, the 3 KB
    above the hand-off block (0x34F400..0x350000). Apps switch to their own again. */
 static void work(void);
@@ -197,7 +117,6 @@ __attribute__((target("arm"), noinline)) static void on_own_stack(void (*f)(void
 }
 static void loader_main(u8 *app_id) {
     u16 b = buttons();
-    if (b & BTN_X) { on_own_stack(sys_work); return; }  /* (it returns only when there is no system: stock) */
     int a_held = (b & BTN_A) != 0, autoboot = cfg_autoboot();
     int want = a_held || autoboot;
     if ((u32)app_id == 1) want = 1;                     /* test call from the UART monitor (the hook passes &app_id) */

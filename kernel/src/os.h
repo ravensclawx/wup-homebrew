@@ -46,6 +46,7 @@ typedef void (*irq_fn)(int n);
 void irq_init(void);
 void irq_attach(int n, int prio, irq_fn f);
 void irq_mask(int n);
+void irq_quiesce(void);
 void irq_on(void);
 void irq_off(void);
 void timer_init(void);                /* timer 1: the 1 kHz tick */

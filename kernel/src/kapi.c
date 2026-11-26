@@ -36,8 +36,8 @@ static void k_wifi_hooks(void (*rx)(const u8 *, u32), void (*link)(int)) { wifi_
 
 static int k_uic(const u8 *o, int no, u8 *i, int ni) { return uic_cmd(o, no, i, ni); }
 static void k_backlight(int pwm) { lcd_backlight(pwm < 0 ? 0 : pwm > 255 ? 255 : pwm); }
-static void k_reboot(void) { sys_reboot(); }
 static void k_power_off(void) { static const u8 c[2] = { 0x01, 0x04 }; uic_cmd(c, 2, NULL, 0); for (;;) sched_sleep(1000); }
+static void k_reboot(void) { klog("reboot asked: ignored (the way out is holding Power)\n"); }
 static int k_flash_write(u32 a, const void *p, u32 n) { return flash_program(a, p, n); }
 static void k_log(const char *s) { klog("%s", s); }
 static int k_self(void) { return sched_current(); }

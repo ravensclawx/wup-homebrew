@@ -123,16 +123,20 @@ int sdio_init(void) {
     HC16(0x30) = 0x01ff; HC16(0x32) = 0x0fff; HC16(0x34) = 0x01ff; HC16(0x36) = 0xffff; HC16(0x38) = 0;
     if (set_clock(128)) return -2;
     u8 volt = caps & (1u << 24) ? 7 : caps & (1u << 25) ? 6 : 5;
-    HC8(0x29) = 0;                                        /* (bus power off a moment: a card left set up by an */
-    delay_ms(50);                                         /*  earlier start is not fresh; the stock driver only */
-    HC8(0x29) = (u8)(volt << 1 | 1);                      /*  ever starts from a cold power-on) */
-    delay_ms(25);
-    sdio_write8(0, 0x06, 0x01); sdio_write8(0, 0x06, 0x02);   /* (abort whatever an earlier start left half done) */
-    sdio_write8(0, 0x06, 0x08);                           /* I/O reset (no answer from a fresh card: fine) */
-    delay_ms(100);                                        /* (with the backplane reset it triggers: time to settle) */
-    sdio_cmd(0, 0, R_NONE, NULL);                         /* (idle) */
+    HC8(0x29) = (u8)(volt << 1 | 1);                      /* bus power on, then CMD5: the stock start, nothing more.
+                                                             (No I/O reset: a radio Nintendo's standby left with its
+                                                             pads isolated is wedged by one; wifi.c un-isolates it as
+                                                             the stock driver does.) */
     delay_ms(2);
-    if (sdio_cmd(5, 0, R_48NC, &r)) return -3;
+    if (sdio_cmd(5, 0, R_48NC, &r)) {                     /* no answer: a card left mid-transfer by an earlier start
+                                                             of ours (a restart from RAM): aborted, reset, idled */
+        sdio_write8(0, 0x06, 0x01); sdio_write8(0, 0x06, 0x02);
+        sdio_write8(0, 0x06, 0x08);
+        delay_ms(100);
+        sdio_cmd(0, 0, R_NONE, NULL);
+        delay_ms(2);
+        if (sdio_cmd(5, 0, R_48NC, &r)) return -3;
+    }
     for (int i = 0; ; i++) {                              /* (the emulator is ready at once; a card may not be) */
         if (sdio_cmd(5, 0x00fff000, R_48NC, &r)) return -4;
         if (r & 0x80000000u) break;

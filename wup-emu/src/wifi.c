@@ -321,8 +321,16 @@ static void f0_write(uint32_t a, uint8_t v) {
     }
 }
 
+/* WIFI_ISO=1: the radio as stock's standby leaves it (on the pad, 2026-11-25): DEVICE_CTL 0x08, pads isolated, its
+   backplane unreachable while that bit is set */
+static void iso_init(void) {
+    static int done; if (done) return; done = 1;
+    if (getenv("WIFI_ISO")) f1regs[0x09] = 0x08;
+}
 static uint8_t f1_read(uint32_t a) {
-    if (a < 0x10000) return bp_read8(sbwindow + (a & 0x7fff));
+    iso_init();
+    if (a < 0x10000) return (f1regs[0x09] & 0x08) ? 0xff : bp_read8(sbwindow + (a & 0x7fff));
+    if (a != 0x1000e) WLOG("[wifi] f1 reg %05x read -> %02x\n", a, a - 0x10000 < sizeof f1regs ? f1regs[a - 0x10000] : 0);
     if (a - 0x10000 < sizeof f1regs) {
         uint32_t r = a - 0x10000;
         if (r == 0x0e) {   /* CHIPCLKCSR */
@@ -348,6 +356,8 @@ static void f1_write(uint32_t a, uint8_t v) {
 
 /* multi-byte F1 access (4-byte aligned register accesses through the window) */
 static void f1_read_block(uint32_t a, uint8_t *buf, int n, bool inc) {
+    iso_init();
+    if (a < 0x10000 && (f1regs[0x09] & 0x08)) { memset(buf, 0xff, n); return; }
     if (a < 0x10000 && n == 4 && !(a & 3)) {
         uint32_t v = bp_read32(sbwindow + (a & 0x7fff));
         memcpy(buf, &v, 4); return;
@@ -355,6 +365,8 @@ static void f1_read_block(uint32_t a, uint8_t *buf, int n, bool inc) {
     for (int i = 0; i < n; i++) buf[i] = f1_read(inc ? a + i : a);
 }
 static void f1_write_block(uint32_t a, const uint8_t *buf, int n, bool inc) {
+    iso_init();
+    if (a < 0x10000 && (f1regs[0x09] & 0x08)) { memset(buf, 0xff, n); return; }
     if (a < 0x10000 && n == 4 && !(a & 3)) {
         uint32_t v; memcpy(&v, buf, 4);
         bp_write32(sbwindow + (a & 0x7fff), v); return;

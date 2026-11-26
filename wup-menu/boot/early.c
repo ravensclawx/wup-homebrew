@@ -3,7 +3,8 @@
  * unreferenced NFC debug strings at LVC 0x50408 (tools/mkflash.py checks them before writing).
  *
  * Nothing of Nintendo's firmware has run yet: stage 2 has set the clocks and done the UIC handshake, the MMU and the
- * caches are off. If X is held (the UIC's input report, read here over SPI), the wup-homebrew kernel is read from its
+ * caches are off. If A is held (the UIC's input report, read here over SPI) or the menu's Autoboot is on (its settings,
+ * flash 0xB0000/0xB1000), the kernel is read from its
  * slot (flash 0x90000: header {"GPST", size, crc32}, the image from 0x91000, linked at RAM 0x10000), checked, and
  * started with r0 = "HOOK" (the flash then in 4-byte address mode): every chip as cold as after power-on, the start its drivers are proven from. In every
  * other case (no X, no valid kernel, anything unexpected) this returns, the displaced instruction runs, and Nintendo's
@@ -23,10 +24,12 @@ typedef unsigned int u32; typedef unsigned char u8;
 #define HOOK_ARG 0x4b4f4f48u                        /* "HOOK" */
 #define BUF      0x00341000u                        /* (where the loader runs later: free memory to Nintendo's firmware,
                                                        which has not started yet; 4 KB, its stack above, to 0x343000) */
-#define BTN_X    0x2000u
+#define BTN_A    0x8000u
+#define CFG0     0x000b0000u                        /* the menu's settings, two records (wup-menu/menu/config.c) */
+#define CFG1     0x000b1000u
 
 int early_main(void);
-static void boot_kernel(void);
+static void boot_kernel(u32 a_held);
 #define FAR __attribute__((noinline, section(".text.far")))
 
 /* the entry (ARM): a stack of our own, the check, then Nintendo's first instruction and on to its second */
@@ -117,8 +120,7 @@ int early_main(void) {
         if (!xfer(UIC_CS, &report, 1, BUF, 128) && r[127] == (u8)~r[0]) { held = (u32)(r[2] << 8 | r[3]); break; }
         for (volatile u32 w = 0; w < 200000; w++) ;
     }
-    if (!(held & BTN_X)) { restore(); return 0; }
-    boot_kernel();                                 /* (back only if there is no whole kernel) */
+    boot_kernel(held & BTN_A);                                 /* (back only if there is no whole kernel) */
     restore();
     return 0;
 }
@@ -141,8 +143,19 @@ FAR static int kernel_whole(void) {
                                                        A read that worked just before fails only if the pad is failing) */
     return 1;
 }
-FAR static void boot_kernel(void) {                    /* (the kernel's flash start, kernel/src/flash.c: 4-byte addresses) */
+/* the menu's Autoboot: the valid record with the higher sequence (config.c: {magic "WCFG", version 1, seq, len 76, crc32},
+   then config_t: light, autoboot, ...) */
+FAR static int autoboot(void) {
+    u32 best = 0, seq = 0;
+    for (u32 a = CFG0; a <= CFG1; a += CFG1 - CFG0) {
+        const u32 *r = (const u32 *)BUF;
+        if (flash(a, BUF, 96) || r[0] != 0x47464357u || r[1] != 1 || r[3] != 76 || ~crc32(~0u, (const u8 *)BUF + 20, 76) != r[4]) continue;
+        if (!best || r[2] > seq) { seq = r[2]; best = 1 + ((const u8 *)BUF)[21]; }
+    }
+    return best > 1;
+}
+FAR static void boot_kernel(u32 a_held) {              /* (the kernel's flash start, kernel/src/flash.c: 4-byte addresses) */
     addr4(1);
-    if (kernel_whole()) start_kernel();
+    if ((a_held || autoboot()) && kernel_whole()) start_kernel();
     addr4(0);                                          /* (no whole kernel: the flash given back as Nintendo expects it) */
 }

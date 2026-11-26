@@ -402,6 +402,12 @@ int wifi_up(void) {
     u8 *pkg = NULL;
     int e = sdio_init();
     if (e) { klog("wifi: SDIO failed (%d)\n", e); return -5; }
+    {   /* Nintendo's standby (wake on WLAN) leaves the radio in deep sleep with its pads isolated (DEVICE_CTL 0x08):
+           its backplane unreachable until the bit is cleared. The stock driver's first step (bcmsdh_attach: "resetting
+           iso bit"), before anything else touches the radio */
+        u8 dc = 0;
+        if (!sdio_read8(1, 0x10009, &dc) && (dc & 0x08)) { sdio_write8(1, 0x10009, 0); klog("wifi: radio woken from standby (pads isolated)\n"); }
+    }
     window = 0xffffffffu;
     int restarted = 0;
 again:;

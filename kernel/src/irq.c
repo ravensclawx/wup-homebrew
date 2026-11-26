@@ -16,6 +16,12 @@ void irq_init(void) {
     REG(0xf00019d8u) = 1; REG(0xf00019dcu) = 0;           /* (stage 2 and LVC write these too; meaning unknown) */
     REG(0xf00013fcu) = 0; IC_LEVEL = 0xf;
 }
+/* before a restart: every source masked and cleared (stage 2 turns interrupts on; a source still armed would land in
+   this kernel's handlers). Timer 1 keeps running: stage 2 counts its delays on it, as the boot ROM leaves it */
+void irq_quiesce(void) {
+    for (int n = 0; n < 32; n++) { IC_CFG(n) = 0x4f; REG(0xf0001420u + 4u * n) = 1; }
+    for (int i = 0; i < 32 && !(IC_ACK & 0x80); i++) IC_LEVEL = 0xf;
+}
 void irq_attach(int n, int prio, irq_fn f) {
     handlers[n] = f;
     IC_CFG(n) = (IC_CFG(n) & ~0x4fu) | (u32)(prio & 0xf);

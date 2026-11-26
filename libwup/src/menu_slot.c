@@ -5,12 +5,12 @@
 #include "wup_system.h"
 #include "armcpu.h"
 typedef uint32_t u32; typedef uint8_t u8;
-/* the slots (wup-menu tools/mkflash.py): the menu's at 0xB2000 and the kernel's at 0x90000 (the early hook checks
+/* the slots (wup-menu tools/mkflash.py): the menu's at 0x10000 and the kernel's at 0xB2000 (the early hook checks
    both) */
-#define MENU_HDR_ 0x000b2000u
-#define MENU_END_ 0x00100000u
-#define KERN_HDR_ 0x00090000u
-#define KERN_END_ 0x000b0000u
+#define MENU_HDR_ 0x00010000u                     /* (the menu: 636 KB, to the settings) */
+#define MENU_END_ 0x000b0000u
+#define KERN_HDR_ 0x000b2000u                     /* (the kernel: 128 KB, after them) */
+#define KERN_END_ 0x000d2000u
 
 static u8 hdr[20], sec[4096];
 static u32 at, fill, crc, size, open_, SLOT_HDR, SLOT_IMG, SLOT_END;

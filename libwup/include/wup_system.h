@@ -3,9 +3,9 @@
  * The two slots Software Update writes, each the safe way: its header erased first and written last, once the whole
  * image has arrived and its CRC matches. Without a whole kernel or a whole menu, A at power-on starts stock (the early
  * hook checks both: wup-menu/boot/early.c), and Software Update can run again from there.
- *   the menu (0xB2000): a 20-byte header {"WMNU", stored size, crc32 of the stored image, inflated size, stamp} at the
+ *   the menu (0x10000, to 0xAFFFF): a 20-byte header {"WMNU", stored size, crc32 of the stored image, inflated size, stamp} at the
  *     start of a 4 KB header sector, then the deflated menu image (wup-menu: tools/mkflash.py kernel_menu_slot)
- *   the kernel (0x90000): header {"GPST", size, crc32}, then the kernel (tools/mkflash.py system_slot) */
+ *   the kernel (0xB2000, to 0xD1FFF): header {"GPST", size, crc32}, then the kernel (tools/mkflash.py kernel_slot) */
 #pragma once
 #include <stdint.h>
 

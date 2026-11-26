@@ -8,6 +8,9 @@
 #include "wup_hw.h"
 #include "wupfmt.h"
 #include "ftpd.h"
+#include "catalog.h"
+#include "release.h"
+#include "version.h"
 
 typedef void (*screen_fn)(lv_obj_t *scr);
 static void kb_screen(lv_obj_t *scr);
@@ -414,6 +417,7 @@ static void wifi_screen(lv_obj_t *scr) {
 static void file_sharing_screen(lv_obj_t *scr);
 static void network_screen(lv_obj_t *scr);
 static void system_screen(lv_obj_t *scr);
+static void on_update(lv_event_t *e);
 static void on_open(lv_event_t *e) { push((screen_fn)lv_event_get_user_data(e)); }
 static void on_wifi(lv_event_t *e) { (void)e; nnets = -1; push(wifi_screen); }
 static void on_theme(lv_event_t *e) { (void)e; M.cfg.light = !M.cfg.light; menu_save(); apply_theme(); show(); }
@@ -485,6 +489,7 @@ static void system_screen(lv_obj_t *scr) {
     row(l, LV_SYMBOL_POWER, "Boot", M.cfg.autoboot ? "Autoboot" : "Hold A", on_boot, NULL);
     note(l, M.cfg.autoboot ? "This menu opens every time the GamePad turns on." : "Hold A while turning the GamePad on to open this menu.");
     { char t[40]; if (!clock_text(t, sizeof t, 1)) strcpy(t, "Not Set"); row(l, WUP_SYMBOL_CLOCK, "Date & Time", t, on_open, date_time_screen); }
+    row(l, LV_SYMBOL_DOWNLOAD, "Software Update", NULL, on_update, NULL);
     sw_row_icon(l, WUP_SYMBOL_TERMINAL, "Developer Mode", !M.cfg.debug_off, on_dev);
     note(l, "Lets development tools on your network read and change the GamePad's memory and flash. Keep it off unless you need it.");
     row(l, WUP_SYMBOL_CHIP, "Firmware", M.firmware, NULL, NULL);
@@ -509,10 +514,62 @@ static void on_erase(lv_event_t *e) {
     (void)e;
     wup_alert("Erase All Content and Settings", "Apps, their data, Wi-Fi and all settings are erased. This can't be undone.", "Erase", "Cancel", erase_go, 1);
 }
+/* ---- Software Update: the newest release of wup-homebrew from GitHub (common/release.c). Checking, then up to date,
+   or the version on offer; installing (the bar; no way back while it writes); then done: the new kernel and menu run
+   from the next start */
+static release_t rel;
+static int upd_err, upd_state;
+enum { UPD_CHECKING, UPD_NONE, UPD_AVAILABLE, UPD_INSTALLING, UPD_DONE, UPD_FAILED };
+static lv_obj_t *upd_sub, *upd_spin, *upd_bar;
+static void upd_idle(void) { wup_lvgl_run(0); menu_poll(); }
+static void upd_progress(int pct) { if (upd_bar) lv_bar_set_value(upd_bar, pct, LV_ANIM_OFF); }
+static void upd_check(void) {
+    catalog_idle = upd_idle;
+    upd_err = release_check(&rel);
+    upd_state = upd_err ? UPD_FAILED : rel.url[0] && version_newer(rel.version, MENU_VERSION) ? UPD_AVAILABLE : UPD_NONE;
+    show();
+}
+static void upd_install(void) {
+    catalog_idle = upd_idle;
+    upd_err = release_install(&rel, upd_progress);
+    upd_bar = 0;
+    upd_state = upd_err ? UPD_FAILED : UPD_DONE;
+    show();
+}
+static void upd_go(void) { upd_state = UPD_INSTALLING; show(); defer(upd_install); }
+static void upd_off(void) { menu_wait(3000); wup_power_off(); }   /* (as the Wii U restarts after its update) */
+/* one line, centred, as the Wii U's System Update shows each step */
+static void upd_say(lv_obj_t *scr, const char *hints, const char *title, const char *line) {
+    busy(page(scr, "Software Update", hints), title, line, &upd_sub, &upd_spin);
+    lv_obj_add_flag(upd_spin, LV_OBJ_FLAG_HIDDEN);
+    if (!line[0]) lv_obj_add_flag(upd_sub, LV_OBJ_FLAG_HIDDEN);
+}
+static void update_screen(lv_obj_t *scr) {
+    switch (upd_state) {
+    case UPD_CHECKING:
+        busy(page(scr, "Software Update", ""), "Checking for Updates\xE2\x80\xA6", "", NULL, NULL);
+        defer(upd_check);
+        break;
+    case UPD_NONE: upd_say(scr, "B Back", "Up to Date", ""); break;
+    case UPD_AVAILABLE: upd_say(scr, "B Back    A Update", "Update Available", ""); break;   /* (A: the key handler) */
+    case UPD_INSTALLING: {
+        lv_obj_t *l = page(scr, "Software Update", "");
+        busy(l, "Installing\xE2\x80\xA6", "Don't turn off the GamePad", &upd_sub, &upd_spin);
+        upd_bar = lv_bar_create(l); lv_obj_set_size(upd_bar, 360, 8); lv_bar_set_range(upd_bar, 0, 100);
+        break;
+    }
+    case UPD_DONE: upd_say(scr, "", "Update Complete", "The GamePad will now turn off"); defer(upd_off); break;
+    default:
+        upd_say(scr, "B Back", rel.url[0] ? "Couldn't Install" : "Can't Check for Updates", catalog_why(upd_err));
+        break;
+    }
+}
+static void on_update(lv_event_t *e) { (void)e; upd_state = UPD_CHECKING; push(update_screen); }
+
 static void reset_screen(lv_obj_t *scr) {
     lv_obj_t *l = page(scr, "Reset", "B Back    A Select");
     row(l, LV_SYMBOL_TRASH, "Erase All Content and Settings", NULL, on_erase, NULL);
-    note(l, "Apps, their data, Wi-Fi and all settings are erased. The Homebrew Menu, App Store and Software Update stay.");
+    note(l, "Apps, their data, Wi-Fi and all settings are erased. wup-homebrew itself stays.");
 }
 
 /* ---- the Netloader: an app sent from a computer (tools/wuplink.py). One thing in the middle of the screen: a
@@ -673,6 +730,10 @@ void ui_step(void) {
         kb_sel = sel; on_kb = here;
     }
     if (stack[depth] == erasing_screen) pressed &= ~WUP_B;   /* (no way back while it erases) */
+    if (stack[depth] == update_screen) {
+        if (upd_state == UPD_INSTALLING || upd_state == UPD_CHECKING || upd_state == UPD_DONE) pressed &= ~WUP_B;
+        if (upd_state == UPD_AVAILABLE && (pressed & WUP_A)) { pressed &= ~WUP_A; sound_click(); defer(upd_go); }
+    }
     if (stack[0] == setup_screen) pressed = 0;                /* (setting up: nothing to press) */
     if (stack[depth] == kb_screen && kb_obj) kb_buttons(pressed, &pressed);   /* the keyboard: B, Y, X, -, +, L and R type */
     if (pressed & WUP_B) {

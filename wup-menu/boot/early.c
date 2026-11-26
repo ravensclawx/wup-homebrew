@@ -5,7 +5,7 @@
  * Nothing of Nintendo's firmware has run yet: stage 2 has set the clocks and done the UIC handshake, the MMU and the
  * caches are off. If A is held (the UIC's input report, read here over SPI) or the menu's Autoboot is on (its settings,
  * flash 0xB0000/0xB1000), the kernel is read from its
- * slot (flash 0x90000: header {"GPST", size, crc32}, the image from 0x91000, linked at RAM 0x10000), checked, and
+ * slot (flash 0xB2000: header {"GPST", size, crc32}, the image from 0xB3000, linked at RAM 0x10000), checked, and
  * started with r0 = "HOOK" (the flash then in 4-byte address mode): every chip as cold as after power-on, the start its drivers are proven from. In every
  * other case (no X, no valid kernel, anything unexpected) this returns, the displaced instruction runs, and Nintendo's
  * firmware starts exactly as it would have (stock).
@@ -16,11 +16,11 @@ typedef unsigned int u32; typedef unsigned char u8;
 #define REG(a)   (*(volatile u32 *)(a))
 #define UIC_CS   0xf00050fcu
 #define FL_CS    0xf00050f8u
-#define SYS_HDR  0x00090000u
-#define SYS_IMG  0x00091000u
-#define SYS_END  0x000b0000u
+#define SYS_HDR  0x000b2000u
+#define SYS_IMG  0x000b3000u
+#define SYS_END  0x000d2000u
 #define SYS_RAM  0x00010000u
-#define KMENU_HDR 0x000b2000u                       /* the kernel's menu (kernel/src/app.c) */
+#define KMENU_HDR 0x00010000u                       /* the kernel's menu (kernel/src/app.c) */
 #define SYS_MAGIC 0x54535047u                       /* "GPST" */
 #define HOOK_ARG 0x4b4f4f48u                        /* "HOOK" */
 #define BUF      0x00341000u                        /* (where the loader runs later: free memory to Nintendo's firmware,

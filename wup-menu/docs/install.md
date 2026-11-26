@@ -75,7 +75,7 @@ during a read it's harmless.
    - `tools/mkflash.py` lists what changes; it refuses anything but firmware rev 7677 and checks the bytes it
      replaces in Product1.
    - It writes about 8 **64 KiB blocks**, each read from the pad first and changed only in its own bytes: the menu
-     and the kernel in the gap (0x90000-0xFFFFF, headers last), the early hook's block in Product1 (0x150000), and
+     and the kernel in the gap (0x10000-0xD1FFF, headers last), the early hook's block in Product1 (0x150000), and
      last the block with the branch to it (0x100000). Apps go on afterwards through file sharing or wuplink.
    - Each block is read back and verified after writing.
 

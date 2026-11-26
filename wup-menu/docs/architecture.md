@@ -47,9 +47,10 @@ Lang2 0x1100000, TVcode 0x1900000, Screen1/2 0x1B00000 / 0x1B80000, Service 0x1C
 |---|---|
 | Product1 LVC_ + 0x40 (0x1000b4) | `b` to the early hook (was `mov r0, #0xdf`) |
 | Product1 LVC_ + 0x50408 / 0x50c9c | the early hook, its two pieces |
-| 0x90000 / 0x91000 | the kernel's slot (to 0xAFFFF): header `{"GPST", size, crc32}` / the kernel |
 | 0xB0000, 0xB1000 | the menu's settings (two `WCFG` records with sequence number and CRC; Autoboot is in them) |
-| 0xB2000 / 0xB3000 | the menu's slot (to 0xFFFFF): header `{"WMNU", stored size, crc32, inflated size, stamp}` / menu image |
+| 0xB2000 / 0xB3000 | the kernel's slot (to 0xD1FFF, 128 KB): header `{"GPST", size, crc32}` / the kernel |
+| 0xD2000-0xFFFFF | free (184 KB, for either to grow into) |
+| 0x10000 / 0x11000 | the menu's slot (to 0xAFFFF, 636 KB; version 1 kept its loader and its menu here): header `{"WMNU", stored size, crc32, inflated size, stamp}` / menu image |
 | 0x900000-0x10FFFFF or 0x1100000-0x18FFFFF | littlefs (8 MB: `/apps`, app data) in whichever of **Lang1 / Lang2** the pad does not use for its message screens (below) |
 
 Everything of ours but the three changes in Product1 is in the gap 0x10000-0xFFFFF, which stock leaves blank.

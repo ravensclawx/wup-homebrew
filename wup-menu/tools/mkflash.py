@@ -6,9 +6,9 @@
   Product1 LVC_ + 0x40       the start-up's first instruction (mov r0, #0xdf) -> b early_entry
   Product1 LVC_ + 0x50408    the early hook, near part (boot/early.c), over 764 bytes of unused NFC debug strings
   Product1 LVC_ + 0x50c9c    the early hook, far part (its A / Autoboot path), over 688 bytes of them
-  0x90000 / 0x91000          the kernel (../kernel/build/kernel.bin): header {"GPST", size, crc32} / the image
+  0xB2000 / 0xB3000          the kernel (../kernel/build/kernel.bin): header {"GPST", size, crc32} / the image
   0xB0000 / 0xB1000          the menu's settings (menu/config.c; the early hook reads Autoboot there)
-  0xB2000 / 0xB3000          the menu (build/apps/homebrew_menu.wup): header {"WMNU", stored size, crc32, inflated size,
+  0x10000 / 0x11000          the menu (build/apps/homebrew_menu.wup): header {"WMNU", stored size, crc32, inflated size,
                              stamp} / the stored image
   littlefs                   optional files (tools/fsimage), e.g. apps, in the spare language copy (libwup/src/fs.c)
 
@@ -29,8 +29,8 @@ EARLY_ADDR, EARLY_MAX = 0x50408, 0x50704 - 0x50408
 EARLY2_ADDR, EARLY2_MAX = 0x50c9c, 0x50f4c - 0x50c9c
 EARLY_DEAD, EARLY2_DEAD = b'NFC_APP_TASK: Format Complete EVT', b'NFCAPP_Shutdown: twai_sem() Timed out!'
 V1_SITE, V1_GET_BOOT_MODE, V1_STUB = 0x63a0e, 0x30734, 0xb951c   # (v1's hook: undone)
-SYS_HDR, SYS_IMG, SYS_END = 0x90000, 0x91000, 0xb0000         # the kernel's slot (boot/early.c)
-KMENU_HDR, KMENU_END = 0xb2000, 0x100000                      # the menu's slot (kernel/src/app.c)
+SYS_HDR, SYS_IMG, SYS_END = 0xb2000, 0xb3000, 0xd2000         # the kernel's slot (boot/early.c; 128 KB)
+KMENU_HDR, KMENU_END = 0x10000, 0xb0000                       # the menu's slot (kernel/src/app.c; 636 KB)
 KERNEL = os.path.join(os.path.dirname(paths.WUPMENU), 'kernel', 'build', 'kernel.bin')
 MENU = os.path.join(paths.WUPMENU, 'build', 'apps', 'homebrew_menu.wup')
 

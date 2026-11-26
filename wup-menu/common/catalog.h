@@ -40,6 +40,8 @@ typedef struct {
     int (*end)(void *arg);
 } catalog_sink;
 int catalog_unzip(const catalog_sink *s, void *arg);
+int catalog_get_url(const char *url, const char *headers, char **out, uint32_t *n);   /* into memory (free *out) */
+int catalog_download(const char *url, uint32_t size_kb, void (*progress)(int));      /* into ZIP_FILE */
 int catalog_install(const catalog_pkg *p, void (*progress)(int));   /* download, write the files, remember them */
 int catalog_remove(const catalog_pkg *p);                            /* its files (manifest.install) and the record */
 enum { CATALOG_ENOWIFI = -100, CATALOG_ENOTIME, CATALOG_ENET, CATALOG_ETLS, CATALOG_EFORMAT, CATALOG_EDAMAGED, CATALOG_ESPACE, CATALOG_EWRITE, CATALOG_ENOMEM };

@@ -1,5 +1,5 @@
 /* The Homebrew Menu and its apps, one after another (the hand-off block: libwup/include/handoff.h). The menu comes
- * from the kernel's menu slot (0xB2000: header {"WMNU", stored size, crc32, inflated size, stamp}, image 0xB3000);
+ * from the kernel's menu slot (0x10000: header {"WMNU", stored size, crc32, inflated size, stamp}, image 0x11000);
  * images are app images (wupfmt.h), usually deflated (tinf), inflated straight into the app block (wup_ram.h). An app
  * that returns WUP_HANDOFF_RUN has staged the next one; after any other the menu runs again, also after the menu
  * itself ends: the way out is holding Power (the choice is at power-on). */
@@ -8,8 +8,8 @@
 #include "../../libwup/include/wupfmt.h"
 #include "../../libwup/third_party/tinf/src/tinf.h"
 
-#define MENU_HDR   0x000b2000u              /* the menu's slot (wup-menu/tools/mkflash.py) */
-#define MENU_END   0x00100000u
+#define MENU_HDR   0x00010000u              /* the menu's slot (wup-menu/tools/mkflash.py) */
+#define MENU_END   0x000b0000u
 #define WMNU       0x554e4d57u
 
 typedef struct { u32 hdr, end; u32 h[5]; } menu_at;

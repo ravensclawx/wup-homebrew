@@ -60,6 +60,40 @@ static int get(const char *url, buf_t *b) {
     return r;
 }
 
+/* ---- for the menu's other pages (Software Update: src/release.c): a URL into memory (0-terminated; free() it), or
+   into ZIP_FILE */
+int catalog_get_url(const char *url, const char *headers, char **out, uint32_t *n) {
+    buf_t b = { 0 };
+    int r = ready();
+    wup_https_opts o = opts(); o.headers = headers;
+    if (!r) r = result(url, wup_https_get(url, &o, collect, &b), CATALOG_ENOMEM);
+    if (r) { free(b.p); return r; }
+    *out = (char *)b.p; *n = b.n;
+    return 0;
+}
+typedef struct { void (*progress)(int); uint32_t got; int bad; } dl_t;
+static int dl_file(void *arg, const uint8_t *d, size_t n, long long total) {
+    dl_t *f = arg;
+    if (fs_stream_write(d, (uint32_t)n)) { f->bad = CATALOG_EWRITE; return 1; }
+    f->got += (uint32_t)n;
+    if (f->progress && total > 0) f->progress((int)(f->got * 100LL / total));
+    return 0;
+}
+int catalog_download(const char *url, uint32_t size_kb, void (*progress)(int)) {
+    if ((uint64_t)size_kb + 64 > fs_size_kb() - fs_used_kb()) return CATALOG_ESPACE;
+    int r = ready();
+    if (r) return r;
+    lfs_mkdir(&fs_lfs, "/.get");
+    if (fs_stream_open(ZIP_FILE)) return CATALOG_EWRITE;
+    dl_t f = { .progress = progress };
+    wup_https_opts o = opts();
+    r = wup_https_get(url, &o, dl_file, &f);
+    if (fs_stream_close() && !f.bad) f.bad = CATALOG_EWRITE;
+    r = f.bad ? f.bad : result(url, r, CATALOG_EWRITE);
+    if (r) fs_remove(ZIP_FILE);
+    return r;
+}
+
 /* ---- repo.json */
 static int is(const char *js, const jsmntok_t *t, const char *s) {
     return t->type == JSMN_STRING && (int)strlen(s) == t->end - t->start && !strncmp(js + t->start, s, (size_t)(t->end - t->start));

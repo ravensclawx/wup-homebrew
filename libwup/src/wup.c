@@ -205,6 +205,7 @@ void wup_motion(wup_motion_t *m) {
 int wup_volume(void) { return REPORT[14]; }
 int wup_power_ac(void) { return REPORT[4] & 1; }
 int wup_headphones(void) { return (REPORT[4] >> 5) & 1; }
+void wup_power_off(void) { WUPK->power_off(); }
 int wup_stick(int which, int axis) {
     int i = which * 2 + axis, off = 6 + 2 * i;
     return (int)(REPORT[off] | REPORT[off + 1] << 8) - 0x800 - stick_rest[i & 3];

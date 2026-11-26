@@ -73,6 +73,7 @@ void wup_motion(wup_motion_t *m);
 int wup_volume(void);                                /* the volume slider, 0..255 (the kernel applies it to the sound) */
 int wup_power_ac(void);                              /* 1: on the charger */
 int wup_headphones(void);                            /* 1: headphones plugged in */
+void wup_power_off(void);                            /* the GamePad off now (as the Power button: the screen faded, the panel off) */
 
 /* audio: 48 kHz 16-bit stereo, the GamePad speakers / headphones (volume slider applies). wup_audio_queue() appends
    frames (L,R pairs) to what is playing, up to about 0.2 s ahead; a sound queued after silence starts 33 ms after the

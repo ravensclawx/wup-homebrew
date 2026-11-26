@@ -109,8 +109,13 @@ int wup_exec(const char *path, const char *arg) {
     memset(h, 0, sizeof *h);
     int n = fs_read(path, 0, h, sizeof *h);
     if (n < WUP_HDR_V1 || h->magic != WUP_MAGIC || !h->code_size || h->code_size > 0xd9000u) return -1;
-    if (h->hdr_size < WUP_HDR_V3) h->code_raw = 0;
+    if (h->hdr_size < WUP_HDR_V3) h->code_raw = h->flags = 0;
     if (h->code_raw > WUP_HANDOFF_WORK_MAX) return -2;
+#ifdef WUP_KERNEL
+    if (!(h->flags & WUP_FLAG_KERNEL)) return -3;       /* built for Nintendo's firmware: not runnable here */
+#else
+    if (h->flags & WUP_FLAG_KERNEL) return -3;          /* built for the wup-homebrew kernel */
+#endif
     strncpy(exec_path, path, sizeof exec_path - 1);
     strncpy(exec_arg, arg ? arg : "", sizeof exec_arg - 1);
     return 0;

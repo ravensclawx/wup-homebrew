@@ -144,7 +144,9 @@ static void autojoin_step(void) {
 /* ---- starting and installing apps */
 const char *menu_start(const char *path) {
     volatile wup_handoff_t *pb = WUP_HANDOFF;
-    if (wup_exec(path, 0)) return "It may be damaged or made for another version";
+    int e = wup_exec(path, 0);
+    if (e == -3) return "It was made for an older version of the Homebrew Menu. Update it in the App Store.";
+    if (e) return "It may be damaged.";
     pb->flags = (radio_ready ? WUP_HO_RADIO_READY : 0) | (M.ip[0] ? WUP_HO_WIFI_JOINED : 0);
     pb->menu_sel = (uint32_t)ui_selected();
     pb->light = (uint8_t)(M.cfg.brightness * 10 + 1);

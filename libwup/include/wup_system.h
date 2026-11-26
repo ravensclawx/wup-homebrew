@@ -10,3 +10,7 @@
 int wup_menu_slot_begin(const uint8_t header[20]); /* 0: it fits the slot, the slot's header is erased */
 int wup_menu_slot_write(const void *data, uint32_t n);   /* the stored image, in order, in any pieces; 0 or < 0 */
 int wup_menu_slot_end(void);                       /* 0: all of it arrived and its CRC matches: the header is written */
+/* On the wup-homebrew kernel (WUP_KERNEL) the menu slot is the kernel's menu (0xB2000), and the kernel itself has a
+   slot (0x90000, header {"GPST", size, crc32}): begun with this, then the same write and end calls. Without a whole
+   kernel (or a whole menu) A at power-on starts stock (wup-menu boot/early.c). */
+int wup_kernel_slot_begin(const uint8_t header[20]);

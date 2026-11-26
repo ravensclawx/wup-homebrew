@@ -20,6 +20,7 @@ typedef unsigned int u32; typedef unsigned char u8;
 #define SYS_IMG  0x00091000u
 #define SYS_END  0x000b0000u
 #define SYS_RAM  0x00010000u
+#define KMENU_HDR 0x000b2000u                       /* the kernel's menu (kernel/src/app.c) */
 #define SYS_MAGIC 0x54535047u                       /* "GPST" */
 #define HOOK_ARG 0x4b4f4f48u                        /* "HOOK" */
 #define BUF      0x00341000u                        /* (where the loader runs later: free memory to Nintendo's firmware,
@@ -131,6 +132,8 @@ FAR static void addr4(int on) { xfer(FL_CS, &fcmd[on ? 0 : 2], 1, 0, 0); xfer(FL
 /* 1: the kernel whole, checked through BUF first (nothing of Nintendo's in RAM touched), then copied to SYS_RAM */
 FAR static int kernel_whole(void) {
     const u32 *h = (const u32 *)BUF;
+    if (flash(KMENU_HDR, BUF, 8) || h[0] != 0x554e4d57u || h[1] < 64) return 0;   /* its menu there ("WMNU"; written last,
+                                                       after a write checked read back: whole), or stock */
     if (flash(SYS_HDR, BUF, 16) || h[0] != SYS_MAGIC || h[1] < 0x100 || h[1] > SYS_END - SYS_IMG) return 0;
     u32 size = h[1], want = h[2], c = ~0u;
     for (u32 o = 0; o < size; o += 4096) {

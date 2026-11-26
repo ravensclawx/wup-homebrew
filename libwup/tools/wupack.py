@@ -36,7 +36,9 @@ def make_icon(path):
     return rgb565(bg)
 
 
-def pack(code, name, author='', version='1.0', icon=None, description='', big=b''):
+def pack(code, name, author='', version='1.0', icon=None, description='', big=b'', kernel=None):
+    if kernel is None:
+        import paths; kernel = paths.KERNEL                # (flags: WUP_FLAG_KERNEL, include/wupfmt.h)
     if code[:4] != b'HBRW': raise ValueError('the code is not an app image (no HBRW header)')
     iconpix = make_icon(icon) if icon else b''
     raw = len(code); code = deflate(code)                 # stored deflated; the CRC is of what is stored
@@ -46,7 +48,7 @@ def pack(code, name, author='', version='1.0', icon=None, description='', big=b'
     icon_off = ((big_off + len(big) if big else code_off + len(code)) + 3) & ~3 if iconpix else 0
     hdr = struct.pack('<IIIIIIII32s32s16s96sIIIIIII', 0x30505557, HDR_V4, code_off, len(code), zlib.crc32(code) & 0xffffffff,
                       icon_off, ICON if iconpix else 0, ICON if iconpix else 0, name.encode()[:31], author.encode()[:31],
-                      version.encode()[:15], description.encode()[:95], raw, 0,
+                      version.encode()[:15], description.encode()[:95], raw, 1 if kernel else 0,
                       BIGMEM if big else 0, big_off, len(big), big_raw, zlib.crc32(big) & 0xffffffff if big else 0)
     assert len(hdr) == HDR_V4
     out = hdr + code

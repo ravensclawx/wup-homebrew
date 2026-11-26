@@ -14,13 +14,15 @@ typedef struct {
     uint32_t icon_off, icon_w, icon_h;     /* icon_off 0: no icon */
     char name[32], author[32], version[16];
     char description[96];                  /* only if hdr_size >= WUP_HDR_V2 */
-    uint32_t code_raw, reserved;           /* only if hdr_size >= WUP_HDR_V3: the code is deflated (raw deflate), this is
+    uint32_t code_raw, flags;              /* only if hdr_size >= WUP_HDR_V3: the code is deflated (raw deflate), this is
                                               its inflated size; code_size and code_crc are of the stored bytes */
     uint32_t big_addr, big_off, big_size, big_raw, big_crc;   /* only if hdr_size >= WUP_HDR_V4 and big_size: code that did not
                                               fit the two segments, raw-deflated; libwup puts it at big_addr (WUP_BIGMEM)
                                               before main() (src/big.c). The loader never sees it. */
 } wup_hdr_t;
 #define WUP_HDR_V1 112                     /* header size before the description existed */
+#define WUP_FLAG_KERNEL 0x1u               /* flags: built for the wup-homebrew kernel (WUP_KERNEL=1). Apps built for
+                                              Nintendo's firmware lack it; each side runs only its own (libwup wup_exec) */
 #define WUP_HDR_V2 208
 #define WUP_HDR_V3 216
 #define WUP_HDR_V4 236

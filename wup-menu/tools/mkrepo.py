@@ -7,7 +7,9 @@ packages/<name>/icon.png. Publish the folder as it is (a web server over HTTPS, 
 
 The packages: the apps below, each zip holding apps/<id>/<id>.wup (the Homebrew Menu's layout), and the Homebrew Menu
 itself as "homebrew_menu" (category system), its zip holding homebrew_menu.bin: the menu slot as stored (a 4 KB header
-sector {"WMNU", stored size, crc32, inflated size, stamp}, then the deflated menu)."""
+sector {"WMNU", stored size, crc32, inflated size, stamp}, then the deflated menu). With WUP_KERNEL=1 (the
+wup-homebrew kernel: every app built for it) the zip holds kernel.bin first, the kernel's slot as stored (a 4 KB
+header sector {"GPST", size, crc32}, then the kernel), and homebrew_menu.bin is the kernel's menu slot."""
 import datetime, hashlib, io, json, os, re, shutil, subprocess, sys, zipfile
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import paths
@@ -72,9 +74,17 @@ def main():
     version = re.search(r'MENU_VERSION="([^"]+)"', open(os.path.join(ROOT, 'menu', 'app.cfg')).read()).group(1)
     for w in os.environ.get('WUP_DEFINES', '').split():
         if w.startswith('MENU_VERSION='): version = w.split('=', 1)[1].strip('"')
-    slot = menu_header(menu, stored).ljust(0x1000, b'\xff') + stored
+    if paths.KERNEL:                                    # (WUP_KERNEL=1: the kernel and its menu, kernel.bin first)
+        from mkflash import system_slot, kernel_menu_slot
+        kdir = os.path.join(PROJECTS, 'kernel')
+        subprocess.run(['make', '-C', kdir], check=True, capture_output=True)
+        kernel = system_slot(open(os.path.join(kdir, 'build', 'kernel.bin'), 'rb').read())
+        files = [('kernel.bin', kernel, zipfile.ZIP_STORED),
+                 ('homebrew_menu.bin', kernel_menu_slot(built(os.path.join(ROOT, 'menu'))), zipfile.ZIP_STORED)]
+    else:
+        files = [('homebrew_menu.bin', menu_header(menu, stored).ljust(0x1000, b'\xff') + stored, zipfile.ZIP_STORED)]
     packages.append(pkg(out, 'homebrew_menu', 'Homebrew Menu', 'wup-homebrew', version, 'system', 'The Homebrew Menu',
-                        'GPL-3.0-or-later', [('homebrew_menu.bin', slot, zipfile.ZIP_STORED)], None, HOME))
+                        'GPL-3.0-or-later', files, None, HOME))
     print('  %-18s %s' % ('homebrew_menu', version))
     json.dump({'packages': packages}, open(os.path.join(out, 'repo.json'), 'w'), indent=1)
     print('%s: %d packages' % (out, len(packages)))

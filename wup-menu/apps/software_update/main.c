@@ -37,10 +37,17 @@ static void check(void) {
     kit_show();
 }
 
-/* the zip's homebrew_menu.bin into the slot: its first 4 KB the header sector, then the stored menu */
-typedef struct { int mine, first, written; uint32_t got; } slot_t;
+/* the zip's homebrew_menu.bin into the slot: its first 4 KB the header sector, then the stored menu. On the
+   wup-homebrew kernel the zip holds kernel.bin too (the kernel's slot as stored, the same shape), ahead of the menu:
+   a new kernel with the old menu still runs it (the kernel's table only grows), and a cut-off update leaves no whole
+   kernel or no whole menu: then A at power-on starts stock, and Software Update can run again from there */
+typedef struct { int mine, kernel, first, written; uint32_t got; } slot_t;
 static int s_begin(void *arg, const char *path, uint32_t size) {
-    slot_t *x = arg; x->mine = !strcmp(path, "homebrew_menu.bin"); x->first = 1; x->got = 0;
+    slot_t *x = arg; x->kernel = 0; x->mine = !strcmp(path, "homebrew_menu.bin");
+#ifdef WUP_KERNEL
+    if (!strcmp(path, "kernel.bin")) x->mine = x->kernel = 1;
+#endif
+    x->first = 1; x->got = 0;
     return x->mine && size < 4096 + 64 ? CATALOG_EDAMAGED : 0;
 }
 static int s_data(void *arg, const uint8_t *d, uint32_t n) {
@@ -48,6 +55,9 @@ static int s_data(void *arg, const uint8_t *d, uint32_t n) {
     if (!x->mine) return 0;
     if (x->first) {                                  /* (pieces are 4 KB: the first is the header sector) */
         x->first = 0;
+#ifdef WUP_KERNEL
+        if (x->kernel) return n != 4096 || wup_kernel_slot_begin(d) ? CATALOG_EDAMAGED : 0;
+#endif
         if (n != 4096 || wup_menu_slot_begin(d)) return CATALOG_EDAMAGED;
         return 0;
     }
@@ -59,7 +69,7 @@ static int s_end(void *arg) {
     slot_t *x = arg;
     if (!x->mine) return 0;
     if (wup_menu_slot_end()) return CATALOG_EWRITE;  /* (the CRC agrees: the new menu is the slot's) */
-    x->written = 1;
+    if (!x->kernel) x->written = 1;                  /* (the menu: last, the update is whole) */
     return 0;
 }
 static void progress(int pct) {                  /* (each update its share of the bar; the menu's last tenth: writing) */

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """The custom firmware: what changes in the GamePad's flash, and a copy of a stock flash image with it (the emulator).
 
-    python3 tools/mkflash.py STOCK.bin OUT.bin [/apps/x/x.wup=local.wup ...]
+    python3 tools/mkflash.py STOCK.bin OUT.bin [--system IMAGE] [/apps/x/x.wup=local.wup ...]
 
   Product1 LVC_ + 0x63a0e   bl get_boot_mode -> bl hook        (the firmware's boot-app selection)
   Product1 LVC_ + 0xb951c   the hook (boot/hook.S, over 160 bytes of unused WPS-CLI debug strings)
   0x10000                   the loader (boot/loader.c, runs at RAM 0x340000, "CFW1" header), up to 8 KB
   0x30000 / 0x31000         the menu slot: header {"WMNU", stored size, crc32, inflated size, stamp} / menu image
+  0xB2000 / 0xB3000         --system: a whole system for X at power-on (boot/loader.c: Wii U GamePad Streamer's
+                            build/streamer.bin): header {"GPST", size, crc32} / the image (to 0xFE000)
   littlefs                  optional files (tools/fsimage), e.g. apps
 Everything else of ours is in the free gap 0x10000-0xFFFFF too (libwup/src/fs.c); Nintendo's partitions are never
 touched beyond those two patches. Only LVC rev 7677 (NR4_12_20140805_release). A real pad gets the same through
@@ -162,20 +164,35 @@ def add_files(f, files):
     return f
 
 
-def build_image(stock, files=()):
-    """stock flash bytes -> CFW flash bytes. files: [(pad path, local path)] put into the pad filesystem"""
+SYS_HDR, SYS_IMG, SYS_END = 0xb2000, 0xb3000, 0xfe000               # X at power-on: a whole system (boot/loader.c)
+
+
+def system_slot(img):
+    """the system slot's bytes (header sector + image) for a system image, e.g. the streamer"""
+    if len(img) > SYS_END - SYS_IMG or img[:4] != bytes.fromhex('18f09fe5'): sys.exit('not a system image (linked at 0x10000)')
+    return struct.pack('<4I', 0x54535047, len(img), zlib.crc32(img) & 0xffffffff, 0) + b'\xff' * (0x1000 - 16) + img
+
+
+def build_image(stock, files=(), system=None):
+    """stock flash bytes -> CFW flash bytes. files: [(pad path, local path)] put into the pad filesystem; system: an
+    image for the system slot (X at power-on)"""
     f = bytearray(stock)
     if f[SELECTOR] == 1: sys.exit('this dump boots Product2: expected a stock pad (Product1)')
     for a, d in patches(lambda x, n: bytes(f[x:x + n])): f[a:a + len(d)] = d
+    if system:
+        s = system_slot(system)
+        f[SYS_HDR:SYS_END] = s + b'\xff' * (SYS_END - SYS_HDR - len(s))
     return bytes(add_files(f, files) if files else f)
 
 
 def main():
     a = sys.argv[1:]
     if len(a) < 2: sys.exit(__doc__)
+    system = None
+    if '--system' in a: i = a.index('--system'); system = open(a[i + 1], 'rb').read(); del a[i:i + 2]
     files = [tuple(x.split('=', 1)) for x in a[2:]]
     stock = open(a[0], 'rb').read()
-    f = build_image(stock, files)
+    f = build_image(stock, files, system)
     open(a[1], 'wb').write(f)
     changed = [s for s in range(0, len(f), 0x1000) if f[s:s + 0x1000] != stock[s:s + 0x1000]]
     print('%s: %d sectors changed%s' % (a[1], len(changed), ', %d files' % len(files) if files else ''))

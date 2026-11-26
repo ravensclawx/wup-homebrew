@@ -97,11 +97,18 @@
 #define SO_REUSE                    1    /* a data port can be listened on again while its last connection lingers */
 #define MEMP_NUM_TCP_SEG            48
 #define MEMP_NUM_SYS_TIMEOUT        (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 3)
-/* SNTP (lwIP's client; the Homebrew Menu's clock, wup-menu: menu/clock.c) */
+/* SNTP (lwIP's client: wup_net_time(), src/net.c; the menu's clock and any app with net = yes). Three servers, asked
+   in turn; an unanswered request is asked again after 3 s, not lwIP's 15 s (the App Store gave up before the second
+   try: "the time isn't set", and with no time no certificate can be checked) */
 #define SNTP_SERVER_DNS             1
 #define SNTP_STARTUP_DELAY          0
-#define SNTP_SET_SYSTEM_TIME_US(sec, us) clock_set_from_network((sec), (us))
-void clock_set_from_network(unsigned sec, unsigned us);
+#define SNTP_MAX_SERVERS            3
+#define SNTP_RECV_TIMEOUT           3000
+#define SNTP_RETRY_TIMEOUT          3000
+#define SNTP_RETRY_TIMEOUT_MAX      60000
+#define SNTP_RETRY_TIMEOUT_EXP      1
+#define SNTP_SET_SYSTEM_TIME_US(sec, us) wup__sntp_time((sec), (us))
+void wup__sntp_time(unsigned sec, unsigned us);
 #define TCP_MSS                     1460
 #define TCP_WND                     (12 * TCP_MSS)
 #define TCP_SND_BUF                 (8 * TCP_MSS)

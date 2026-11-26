@@ -186,6 +186,27 @@ int wup_net_stats(char *o, int n) {
 
 void wup_net_tx_pacing(unsigned r, unsigned b) { wup_netif_tx_pacing(r, b); }
 
+/* the date and time from the network (lwIP's SNTP client), for the menu and any app with net = yes: started once,
+   asked again every hour. Apps also get the time from the menu in the hand-off block; this covers an app started
+   before the menu had heard back (the App Store then could not check any certificate) */
+#include "lwip/apps/sntp.h"
+void wup__sntp_time(unsigned sec, unsigned us) {
+    wup_time_set((int64_t)sec, us);
+    wup_log("[net] the time from the network\n");
+}
+void wup_net_time(void) {
+    static int on;
+    if (on || !net_up) return;
+    LOCK();
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, "pool.ntp.org");
+    sntp_setservername(1, "time.google.com");
+    sntp_setservername(2, "time.cloudflare.com");
+    sntp_init();
+    UNLOCK();
+    on = 1;
+}
+
 /* lwIP asserts: logged on the UART */
 void wup_net_assert(const char *msg, const char *file, int line) {
     (void)file; wup_log("[net] lwIP assert: "); wup_log(msg); wup_log(" line "); wup_log_hex((u32)line); wup_log("\n");

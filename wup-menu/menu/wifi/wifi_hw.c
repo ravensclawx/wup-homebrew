@@ -26,7 +26,7 @@ static void DLY(int ms) {
 enum { WLC_UP = 2, WLC_GET_INFRA = 19, WLC_SET_INFRA = 20, WLC_SET_AUTH = 22, WLC_GET_BSSID = 23,
        WLC_GET_SSID = 25, WLC_SET_SSID = 26, WLC_SCAN = 50, WLC_SCAN_RESULTS = 51, WLC_GET_RSSI = 127,
        WLC_SET_WSEC = 134, WLC_GET_UP = 162, WLC_SET_WPA_AUTH = 165, WLC_GET_VAR = 262, WLC_SET_VAR = 263,
-       WLC_SET_WSEC_PMK = 268 };
+       WLC_SET_PM = 86, WLC_SET_WSEC_PMK = 268 };
 
 #define BUFSZ 0x2000                 /* the Python tools used this; larger risks the 165-3423 stop */
 static u8 iobuf[BUFSZ + 64] __attribute__((aligned(32)));
@@ -132,6 +132,8 @@ int wifi_bringup(const char *country) {
     }
     setvar_int("a_mrate", 12);
     setvar_int("a_rate", 108);
+    setint(WLC_SET_PM, 0);       /* power saving off: on, the radio dozed between beacons and frames waited up to ~1 s
+                                    (measured in wup-os on the same radio and firmware) */
     getint(WLC_GET_UP, &up);
     return up ? 0 : -1;
 }

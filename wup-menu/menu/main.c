@@ -69,7 +69,7 @@ void menu_wait(int ms) {
 }
 int menu_radio(void) {
     if (radio_ready) return 0;
-    int p = wifi_patch_radio(), b = p >= 0 ? wifi_bringup("DE") : -1;
+    int p = wifi_patch_radio(), b = p >= 0 ? wifi_bringup(WIFI_COUNTRY) : -1;
     wdbg("patch", p); wdbg("bringup", b);
     if (p < 0 || b) return -1;
     radio_ready = 1;
@@ -99,7 +99,7 @@ const char *menu_connect(const wifi_net *n, const char *pass) {
         M.cfg.wifi_saved = 1; M.cfg.secured = (uint8_t)n->secured; M.cfg.ssid_len = n->ssid_len;
         memcpy(M.cfg.ssid, n->ssid, 33);
         memcpy(M.cfg.pmk, pmk, 32); if (!n->secured) memset(M.cfg.pmk, 0, 32);
-        memcpy(M.cfg.country, "DE", 3);
+        memcpy(M.cfg.country, WIFI_COUNTRY, 3);
         menu_save();
     }
     memset(pmk, 0, sizeof pmk);

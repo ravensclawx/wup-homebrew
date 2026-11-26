@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include "lwip/apps/sntp.h"
 #include "menu.h"
 #include "fs.h"
 
@@ -64,17 +63,11 @@ void clock_set_zone(int i) {
 int clock_24h(void) { return cfg.h24; }
 void clock_set_24h(int on) { cfg.h24 = (uint8_t)!!on; save(); }
 
-/* SNTP: started the first time there is an address (lwIP asks again every hour by itself) */
+/* SNTP: started the first time there is an address (libwup: wup_net_time; lwIP asks again every hour by itself) */
 void clock_network(int online) {
     if (!online || sntp_on) return;
-    sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, "pool.ntp.org");
-    sntp_init();
+    wup_net_time();
     sntp_on = 1;
-}
-void clock_set_from_network(unsigned sec, unsigned us) {   /* (lwipopts.h: SNTP_SET_SYSTEM_TIME_US) */
-    wup_time_set((int64_t)sec, us);
-    printf("[menu] the time from the network: %u\n", (unsigned)sec);
 }
 
 /* "9:41" (12-hour, as a status bar shows it: no AM/PM) or "21:41"; long: "Tue, Nov 18, 9:41 PM" or "Tue, Nov 18, 21:41";

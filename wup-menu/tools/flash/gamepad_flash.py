@@ -132,17 +132,23 @@ def eeprom_plausible(ee, cfg):
     return None
 
 
-def eeprom_read_verified(t, base=0x1000, n=0x800, tries=3):
+def eeprom_read_verified(t, base=0x1000, n=0x800, tries=8):
+    """Two matching, plausible reads; None if the UIC never answers. The UIC (the pad's power microcontroller) takes
+    about a second after power-on before it answers (measured on a pad: wup-os, 2026-11-25), and through the UART
+    payload some pads' reads come back all zeros for good (issue #25; the maintainer's own pad too). The EEPROM is only
+    kept with the backup, never written by the install, so the backup goes on without it."""
     cfg = board_config(t)
     print('  board config (C command): 0x%02x' % cfg)
     prev = None
-    for _ in range(tries):
+    for k in range(tries):
         cur = bytes(eeprom_byte(t, base + i) for i in range(n))
         bad = eeprom_plausible(cur, cfg)
-        if bad: print('    EEPROM read implausible: %s' % bad); prev = None; continue
+        if bad:
+            print('    EEPROM read implausible: %s' % bad); prev = None
+            time.sleep(1); continue                       # (the UIC may still be starting)
         if cur == prev: return cur
         prev = cur
-    raise ReadError('EEPROM: could not get two matching, plausible reads')
+    return None
 
 
 def connect_attached(port):
@@ -161,6 +167,7 @@ def cmd_eeprom(a):
     try:
         ee = eeprom_read_verified(t)
     finally: t.close()
+    if ee is None: sys.exit('the UIC did not answer: no EEPROM read (power the pad off, then try again)')
     out = a.out
     open(out, 'wb').write(ee)
     print('saved %s  sha256 %s  (contains the pairing key: keep private)' % (out, sha(ee)))
@@ -205,8 +212,13 @@ def cmd_backup(a):
         if not os.path.exists(ee_path):
             print('UIC EEPROM 0x1000-0x17FF (read twice)...')
             ee = eeprom_read_verified(t, 0x1000, 0x800)
-            open(ee_path, 'wb').write(ee)
-        print('UIC EEPROM ok')
+            if ee is None:
+                print('  !! the UIC did not answer: the backup goes on without the EEPROM (the install never writes it;')
+                print('     only the flash is needed to install or to restore)')
+            else:
+                open(ee_path, 'wb').write(ee)
+                print('UIC EEPROM ok')
+        else: print('UIC EEPROM ok')
 
         print('SPI flash: 32 x 1 MiB, each read twice (~3 min per MiB, ~100 min total)')
         t0 = time.time(); todo = [c for c in range(FLASH_SIZE // CHUNK) if c not in done]
@@ -223,11 +235,11 @@ def cmd_backup(a):
     img = open(part, 'rb').read()
     os.replace(part, os.path.join(d, 'flash.bin')); os.remove(prog)
     ok = check_image(img, 'flash.bin')
-    ee = open(ee_path, 'rb').read()
-    info['flash_sha256'] = sha(img); info['eeprom_sha256'] = sha(ee)
+    ee = open(ee_path, 'rb').read() if os.path.exists(ee_path) else None
+    info['flash_sha256'] = sha(img); info['eeprom_sha256'] = sha(ee) if ee else 'not read (the UIC did not answer)'
     info['note'] = 'Contains the GamePad pairing key (EEPROM + flash). Keep private. Boot ROM not included: it is not readable once the payload runs; bootrom.bin in the repo root matches the published SHA-256.'
     json.dump(info, open(os.path.join(d, 'info.json'), 'w'), indent=2)
-    open(os.path.join(d, 'SHA256SUMS'), 'w').write('%s  flash.bin\n%s  uic_eeprom.bin\n' % (info['flash_sha256'], info['eeprom_sha256']))
+    open(os.path.join(d, 'SHA256SUMS'), 'w').write('%s  flash.bin\n' % info['flash_sha256'] + ('%s  uic_eeprom.bin\n' % info['eeprom_sha256'] if ee else ''))
     for n, (s0, ln) in wuptool.PARTITIONS.items():
         if n != 'all' and img[s0:s0 + ln].count(0xff) == ln: print('  (area %s is blank/erased)' % n)
     print(json.dumps(info, indent=2))

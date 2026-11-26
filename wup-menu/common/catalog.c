@@ -44,7 +44,8 @@ static int collect(void *arg, const uint8_t *d, size_t n, long long total) {
 }
 static int ready(void) {
     if (wup_net_init()) return CATALOG_ENOWIFI;
-    for (int t = 0; !wup_time_known() && t < 5000; t += 100) wup_sleep(100);
+    wup_net_time();                                    /* (the menu may not have heard back before this app started) */
+    for (int t = 0; !wup_time_known() && t < 20000; t += 100) wup_sleep(100);
     return 0;
 }
 static int result(const char *url, int r, int stopped) {

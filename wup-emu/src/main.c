@@ -133,7 +133,8 @@ static void handle_cbutton(int b, bool down) {
 static void handle_caxis(int a, int v) {
     UicInput *in = &uic_input;
     int s = 0x800 + v / 16;                  /* -32768..32767 -> 12 bit */
-    if (s < 0) s = 0; if (s > 0xfff) s = 0xfff;
+    if (s < 0) s = 0;
+    if (s > 0xfff) s = 0xfff;
     int inv = 0xfff - s;                     /* SDL: up is negative; GamePad: up is high */
     switch (a) {
     case SDL_CONTROLLER_AXIS_LEFTX: in->lx = s; break;
@@ -160,7 +161,10 @@ static void set_touch_screen(float lx, float ly, bool down) {
     /* inverse of the firmware's default touch calibration:
        x = (rx - 195) * 814 / 3682 + 20,  y = (ry - 278) * -440 / 3445 + 460 */
     float rx = (lx - 20) * 3682.0f / 814.0f + 195, ry = (460 - ly) * 3445.0f / 440.0f + 278;
-    if (rx < 0) rx = 0; if (rx > 4095) rx = 4095; if (ry < 0) ry = 0; if (ry > 4095) ry = 4095;
+    if (rx < 0) rx = 0;
+    if (rx > 4095) rx = 4095;
+    if (ry < 0) ry = 0;
+    if (ry > 4095) ry = 4095;
     uic_input.tx = (uint16_t)rx;
     uic_input.ty = (uint16_t)ry;
 }
@@ -316,7 +320,10 @@ int main(int argc, char **argv) {
             case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEMOTION: case SDL_MOUSEBUTTONUP: {
                 int mx, my; uint32_t st = SDL_GetMouseState(&mx, &my);
                 float lx, ly; SDL_RenderWindowToLogical(ren, mx, my, &lx, &ly);
-                if (lx < 0) lx = 0; if (ly < 0) ly = 0; if (lx > LCD_W - 1) lx = LCD_W - 1; if (ly > LCD_H - 1) ly = LCD_H - 1;
+                if (lx < 0) lx = 0;
+                if (ly < 0) ly = 0;
+                if (lx > LCD_W - 1) lx = LCD_W - 1;
+                if (ly > LCD_H - 1) ly = LCD_H - 1;
                 set_touch_screen(lx, ly, (st & SDL_BUTTON_LMASK) && ev.type != SDL_MOUSEBUTTONUP);
                 break;
             }

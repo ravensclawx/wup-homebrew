@@ -143,6 +143,7 @@ int wup_net_online(void);
 uint32_t wup_net_ip(void);                           /* the pad's address (network byte order) */
 const char *wup_net_ip_str(void);                    /* "192.168.4.101" */
 int wup_net_stats(char *out, int n);
+void wup_net_time(void);                             /* the date and time from the network (SNTP), once networking is up */
 void wup_net_tx_pacing(unsigned frames_per_ms_x10, unsigned burst);   /* (diagnostics) */                 /* "rx=... rx_dropped=... pool_err=..." (diagnostics) */
 extern void (*wup__net_poll)(void), (*wup__net_exit)(void), (*wup__net_log)(const char *);   /* (libwup internal) */
 extern int (*wup__sock_close)(int fd);

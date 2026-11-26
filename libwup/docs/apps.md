@@ -65,7 +65,8 @@ layout.)
 ## Tests
 
 `tests/` holds apps that check the runtime, one line per check on the screen and in the log: `sdk` (C library,
-files), `lvgl`, `exec` (one app starting another), `kernel` (threads, semaphores), `pthread`, `sockets`. Run one
+files), `lvgl`, `exec` (one app starting another), `kernel` (threads, semaphores), `pthread`, `sockets`, `input` (every input live: buttons, sticks, touch, motion,
+volume, power; A rumbles). Run one
 like any app, on the pad or in the emulator:
 
 ```

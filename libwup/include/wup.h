@@ -55,17 +55,28 @@ void wup_vblank(void);                               /* wait for the vertical bl
 /* input */
 enum { WUP_A = 0x8000, WUP_B = 0x4000, WUP_X = 0x2000, WUP_Y = 0x1000, WUP_LEFT = 0x0800, WUP_RIGHT = 0x0400,
        WUP_UP = 0x0200, WUP_DOWN = 0x0100, WUP_ZL = 0x0080, WUP_ZR = 0x0040, WUP_L = 0x0020, WUP_R = 0x0010,
-       WUP_PLUS = 0x0008, WUP_MINUS = 0x0004, WUP_HOME = 0x0002 };
-unsigned wup_buttons(void);
+       WUP_PLUS = 0x0008, WUP_MINUS = 0x0004, WUP_HOME = 0x0002, WUP_SYNC = 0x0001,
+       WUP_L3 = 0x10000, WUP_R3 = 0x20000, WUP_TV = 0x40000 };   /* (L3, R3: the sticks pressed in) */
+unsigned wup_buttons(void);                          /* held now */
+unsigned wup_pressed(void);                          /* went down since the last call (games) */
+unsigned wup_repeat(void);                           /* the same, plus the D-pad again while held (after 400 ms, every
+                                                        80 ms): for menus, lists, keyboards */
 /* sticks: 0 at rest (each pad rests a little off centre: measured when the app starts), about +-WUP_STICK_MAX at
    full tilt (measured on the pad), right and up positive */
 #define WUP_STICK_MAX 1100
 int wup_stick(int which, int axis);                  /* which 0 left / 1 right, axis 0 x / 1 y */
 int wup_touch(int *x, int *y);                       /* 1 while the screen is touched: x 0..853, y 0..479 */
+/* motion, raw from the sensors (about 180 readings a second): the accelerometer (16 bits), the gyroscope (24 bits,
+   signed), the magnetometer (16 bits), x y z each */
+typedef struct { int16_t accel[3]; int32_t gyro[3]; int16_t mag[3]; } wup_motion_t;
+void wup_motion(wup_motion_t *m);
+int wup_volume(void);                                /* the volume slider, 0..255 (the kernel applies it to the sound) */
+int wup_power_ac(void);                              /* 1: on the charger */
+int wup_headphones(void);                            /* 1: headphones plugged in */
 
 /* audio: 48 kHz 16-bit stereo, the GamePad speakers / headphones (volume slider applies). wup_audio_queue() appends
    frames (L,R pairs) to what is playing, up to about 0.2 s ahead; a sound queued after silence starts 33 ms after the
-   call. Usable from any thread; a thread of libwup's own keeps the hardware's ring clean while it is open. */
+   call. Usable from any thread; the kernel keeps the ring. */
 int wup_audio_open(void);                            /* 0 = playing */
 int wup_audio_queue(const int16_t *lr, int frames);  /* how many it took (fewer when there is no room: queue the rest later) */
 int wup_audio_queued(void);                          /* frames still waiting to be played */

@@ -11,6 +11,6 @@ int main(void) {
     gfx_present_all();
 
     while (wup_buttons() & WUP_B) wup_sleep(16);         /* not a B still held from before */
-    while (!(wup_buttons() & WUP_B)) wup_sleep(16);      /* wup_sleep lets the firmware run */
+    while (!(wup_buttons() & WUP_B)) wup_sleep(16);      /* (wup_sleep gives the other tasks a turn) */
     return 0;                                            /* back to the menu */
 }

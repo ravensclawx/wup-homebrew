@@ -9,9 +9,9 @@ typedef uint32_t u32; typedef uint8_t u8; typedef uint16_t u16;
 #define LCD(o) REG(0xf0009400u + (o))
 #define HWCLK REG(0xf0000408u)
 #include "wupk.h"
-#define FW_DLY(ms) WUPK->sleep(ms)
-#define FW_REPORT  (WUPK->report)
-#define FW_BUTTONS (WUPK->report + 2)                 /* (the report's buttons, big-endian) */
+#define DLY(ms) WUPK->sleep(ms)
+#define REPORT  (WUPK->report)
+#define BUTTONS (WUPK->report + 2)                 /* (the report's buttons, big-endian) */
 
 extern u8 __bss_start[], __bss_end[];
 #define STACK_WORDS 16384                              /* 64 KB: the app block has room */
@@ -46,7 +46,7 @@ static void app_main(void) {
     fade_pending = 1; gfx_present_hook = fade_in_now;
     copy_boot();
     for (int i = 0; i < 4; i++) {                      /* the sticks at rest: each pad's are a little off centre */
-        int v = (int)(FW_REPORT[6 + 2 * i] | FW_REPORT[7 + 2 * i] << 8) - 0x800;
+        int v = (int)(REPORT[6 + 2 * i] | REPORT[7 + 2 * i] << 8) - 0x800;
         stick_rest[i] = v > -300 && v < 300 ? v : 0;
     }
     int formatted = 0;
@@ -165,17 +165,49 @@ void wup_audio_close(void) { WUPK->audio_stop(); }
 
 /* Each button's change is taken at once, and then that button is not listened to for 25 ms: a contact that bounces as
    it closes or opens is one press, not two, and nothing is delayed. */
-unsigned wup_buttons(void) {
-    static unsigned stable; static uint32_t at[16];
-    unsigned raw = (unsigned)(FW_BUTTONS[0] << 8 | FW_BUTTONS[1]), diff = (raw ^ stable) & 0xffff;
+unsigned wup_buttons(void) {                         /* (a change counts once it has held 25 ms: no bounce) */
+    static unsigned stable; static uint32_t at[19];
+    u8 x = REPORT[80];                             /* the stick clicks and TV (report byte 80) */
+    unsigned raw = (unsigned)(BUTTONS[0] << 8 | BUTTONS[1]) | (x & 0x80 ? WUP_L3 : 0) | (x & 0x40 ? WUP_R3 : 0) | (x & 0x20 ? WUP_TV : 0);
+    unsigned diff = (raw ^ stable) & 0x7ffff;
     uint32_t now = wup_us();
     for (int i = 0; diff; i++, diff >>= 1)
         if ((diff & 1) && (!at[i] || now - at[i] > 25000)) { stable ^= 1u << i; at[i] = now | 1; }
     return stable;
 }
+unsigned wup_pressed(void) {
+    static unsigned last;
+    unsigned b = wup_buttons(), p = b & ~last;
+    last = b;
+    return p;
+}
+unsigned wup_repeat(void) {
+    static unsigned last; static uint32_t since[4], at[4];
+    static const unsigned dirs[4] = { WUP_UP, WUP_DOWN, WUP_LEFT, WUP_RIGHT };
+    unsigned b = wup_buttons(), r = b & ~last;
+    uint32_t now = wup_us() / 1000;
+    for (int i = 0; i < 4; i++) {
+        if (r & dirs[i]) { since[i] = at[i] = now; continue; }
+        if ((b & dirs[i]) && now - since[i] >= 400 && now - at[i] >= 80) { r |= dirs[i]; at[i] = now; }
+    }
+    last = b;
+    return r;
+}
+void wup_motion(wup_motion_t *m) {
+    const volatile u8 *r = REPORT;
+    for (int i = 0; i < 3; i++) {
+        m->accel[i] = (int16_t)(r[15 + 2 * i] | r[16 + 2 * i] << 8);
+        int g = r[21 + 3 * i] | r[22 + 3 * i] << 8 | r[23 + 3 * i] << 16;
+        m->gyro[i] = g << 8 >> 8;                     /* (24 bits, signed) */
+        m->mag[i] = (int16_t)(r[30 + 2 * i] | r[31 + 2 * i] << 8);
+    }
+}
+int wup_volume(void) { return REPORT[14]; }
+int wup_power_ac(void) { return REPORT[4] & 1; }
+int wup_headphones(void) { return (REPORT[4] >> 5) & 1; }
 int wup_stick(int which, int axis) {
     int i = which * 2 + axis, off = 6 + 2 * i;
-    return (int)(FW_REPORT[off] | FW_REPORT[off + 1] << 8) - 0x800 - stick_rest[i & 3];
+    return (int)(REPORT[off] | REPORT[off + 1] << 8) - 0x800 - stick_rest[i & 3];
 }
 
 /* ---- the motor, the brightness, the microphone (src/wup_hw.c) */
@@ -202,7 +234,7 @@ static void hw_reset(void) {
 int wup_touch(int *x, int *y) {
     int n = 0, sx = 0, sy = 0;
     for (int i = 0; i < 10; i++) {
-        u16 rx = (u16)(FW_REPORT[36 + 4 * i] | FW_REPORT[37 + 4 * i] << 8), ry = (u16)(FW_REPORT[38 + 4 * i] | FW_REPORT[39 + 4 * i] << 8);
+        u16 rx = (u16)(REPORT[36 + 4 * i] | REPORT[37 + 4 * i] << 8), ry = (u16)(REPORT[38 + 4 * i] | REPORT[39 + 4 * i] << 8);
         if ((rx & 0x8000) && (ry & 0x8000)) { sx += rx & 0xfff; sy += ry & 0xfff; n++; }
     }
     if (!n) return 0;
@@ -218,10 +250,10 @@ void wup_sleep(int ms) {
     if (fade_pending && HWCLK - fade_t0 > fade_wait) fade_in_now();   /* never presented: show it anyway */
     if (wup__net_poll) {                               /* networking: keep the stack running while asleep */
         wup__net_poll();
-        while (ms > 0) { FW_DLY(ms > 2 ? 2 : ms); ms -= 2; wup__net_poll(); }
+        while (ms > 0) { DLY(ms > 2 ? 2 : ms); ms -= 2; wup__net_poll(); }
         return;
     }
-    while (ms > 0) { FW_DLY(ms > 100 ? 100 : ms); ms -= 100; }
+    while (ms > 0) { DLY(ms > 100 ? 100 : ms); ms -= 100; }
 }
 
 
@@ -229,7 +261,7 @@ void wup_sleep(int ms) {
    byte 4 bit 6 = charging. The signal: the radio's WLC_GET_RSSI (127) */
 static int uic_query(int cmd) { u8 c = (u8)cmd, v = 0; return WUPK->uic(&c, 1, &v, 1) ? -1 : v; }
 int wup_battery(int *charging) {
-    int chg = (FW_REPORT[4] >> 6) & 1;                                  /* (the input report, byte 4) */
+    int chg = (REPORT[4] >> 6) & 1;                                  /* (the input report, byte 4) */
     if (charging) *charging = chg;
     int lv = uic_query(0x10);
     if (lv < 0 || lv > 6 || (chg && lv == 0)) return -1;               /* (level 0 while charging: unknown) */

@@ -57,7 +57,9 @@ static void rect_copy(px_t *to, const px_t *from, int x, int y, int w, int h) {
 }
 /* the back buffer shown; the region x, y, w, h (what changed since the last present) carried over into the new back
    buffer. NULL region: the whole screen */
+extern int wup__video_on;                                 /* (video.c: the screens are the decoder's) */
 static void flip(int x, int y, int w, int h) {
+    if (wup__video_on) return;
     if (w > 0 && h > 0) dclean(scr_back + y * GFX_W, (u32)h * GFX_W * 2);   /* (the rows presented) */
     WUPK->screen_show(scr_back);
     px_t *t = scr_front; scr_front = scr_back; scr_back = t;
@@ -73,6 +75,7 @@ void gfx_present(int x, int y, int w, int h) {
 void gfx_present_all(void) { flip(0, 0, GFX_W, GFX_H); }
 /* LVGL (src/lvgl.c) keeps both screens itself: it only needs the switch */
 void gfx__show(px_t *buf, int y0, int y1) {        /* (rows y0..y1 changed) */
+    if (wup__video_on) return;
     if (y1 >= y0) dclean(buf + y0 * GFX_W, (u32)(y1 - y0 + 1) * GFX_W * 2);
     WUPK->screen_show(buf);
     scr_front = buf; scr_back = buf == (px_t *)WUP_FB0 ? (px_t *)WUP_FB1 : (px_t *)WUP_FB0;

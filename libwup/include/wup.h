@@ -85,6 +85,33 @@ int wup_mic_open(void);                              /* 16-bit mono 48 kHz; 0 = 
 int wup_mic_read(int16_t *out, int max);             /* samples recorded since the last call: call at least every 20 ms */
 void wup_mic_close(void);
 
+/* video: the hardware H.264 decoder shows its pictures on the screen itself (854 x 480; each frame's raw CABAC slice
+   data, the GamePad's profile, as libwupstream makes it). Its memory is the screens': while video is open nothing is
+   drawn or shown (gfx_present does nothing); after wup_video_close the app draws its screen again from scratch. Feed
+   it often: wup_video_waiting() frames are queued (keep it at 1..3); after a lost or late frame only a keyframe goes
+   on (wup_video_need_key). Closed again when the app ends. */
+int wup_video_open(void);                            /* 0, or < 0 */
+int wup_video_frame(const void *data, unsigned n, int keyframe);   /* 0, or < 0: dropped (ask for a keyframe) */
+int wup_video_need_key(void);
+int wup_video_waiting(void);
+void wup_video_close(void);
+unsigned wup_us_since_vblank(void);                  /* microseconds since the screen's last refresh (59.94 a second) */
+const volatile uint8_t *wup_input_report(void);      /* the power chip's raw 128-byte input report (what libwupstream reads) */
+
+/* the camera (front, 640 x 480, about 55 frames a second). Not while video is open. Off again when the app ends */
+int wup_camera_open(void);                           /* 0, or < 0; its frame buffer (450 KB) comes from the heap */
+int wup_camera_draw(int x, int y, int mirror);       /* the newest picture into the screen (gfx_fb) at x, y; mirror: left
+                                                        and right swapped. 1: a new one, 0: none new, < 0: off or outside */
+void wup_camera_close(void);
+/* the camera through the hardware H.264 encoder, while video is open (WUP Stream's camera): about 59 frames a second
+   of bare slice data, the first after every start a keyframe, every later one needing all before it (a receiver that
+   loses one asks for wup_camera_encode_restart). Frames come ~0.2 s after opening */
+int wup_camera_encode_open(void);
+int wup_camera_encode_read(void *frame, int max);   /* often: a frame's length (64 KB hold any), 0 none yet, < 0 off */
+void wup_camera_encode_restart(void);
+unsigned wup_camera_encode_starts(void);
+void wup_camera_encode_close(void);
+
 /* time */
 /* the date and time: known once the menu has had them from the network (each time it joins Wi-Fi); then time(),
    gettimeofday() and localtime() give them, in the time zone set in the menu. The pad keeps no time when it is off. */

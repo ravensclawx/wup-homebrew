@@ -8,7 +8,7 @@
 
 #define WUPK_PTR     0x00000080u
 #define WUPK_MAGIC   0x4b505557u                 /* "WUPK" */
-#define WUPK_VERSION 3
+#define WUPK_VERSION 4
 
 typedef struct wupk {
     uint32_t magic, version;
@@ -68,6 +68,29 @@ typedef struct wupk {
                                                     20 ms or the ring overruns */
     void (*mic_close)(void);
     void (*rumble)(int on);
+    /* version 4: video and the camera (all off again whenever an app ends).
+       Video: the hardware H.264 decoder shows its pictures itself (854 x 480; each frame's raw CABAC slice data, as
+       libwupstream makes it). Its memory is the screens': while video is open nothing may be drawn or shown. */
+    int (*video_open)(void);
+    int (*video_frame)(const void *data, uint32_t n, int keyframe);   /* 0, or < 0: dropped (send a keyframe) */
+    int (*video_need_key)(void);                 /* nonzero: only a keyframe can go on (lost frames, a stall) */
+    int (*video_waiting)(void);                  /* frames not yet decoded (keep it at 1..3) */
+    void (*video_close)(void);                   /* the screen back (both buffers to be drawn again) */
+    uint32_t (*us_since_vblank)(void);           /* microseconds since the screen's last refresh */
+    /* the camera's raw frames (front, 640 x 480): into buf (cam_frame_size bytes, 32-aligned, the app's, until closed) */
+    uint32_t cam_frame_size;
+    int (*cam_open)(uint8_t *buf);               /* 0, or < 0 */
+    int (*cam_ready)(void);                      /* nonzero: a new frame is in buf, held until cam_next */
+    void (*cam_next)(void);
+    void (*cam_convert)(uint16_t *dst, int stride, int mirror);   /* the frame -> 640 x 480 RGB565 at dst */
+    void (*cam_close)(void);
+    /* the camera through the H.264 encoder, while video is open (its memory is the screens' too): about 59 frames a
+       second of bare slice data; the first after every start a keyframe. Not together with cam_open */
+    int (*cam_enc_open)(void);                   /* 0, or < 0 (frames ~0.2 s later) */
+    int (*cam_enc_read)(uint8_t *out, uint32_t max);   /* often: a frame's length, 0 none yet, < 0 off */
+    void (*cam_enc_restart)(void);               /* a new start now (a receiver that lost a frame asks for it) */
+    uint32_t (*cam_enc_starts)(void);            /* starts since opened */
+    void (*cam_enc_close)(void);
 } wupk_t;
 
 #define WUPK (*(const wupk_t *const *)WUPK_PTR)

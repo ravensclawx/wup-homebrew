@@ -68,7 +68,7 @@ void apps_run(void *unused) {
         if (!staged && !stage_menu(pb)) break;
         int menu = !staged;
         int r = run_staged(pb);
-        rumble(0); mic_close(); audio_stop();            /* (whatever the app left on) */
+        rumble(0); mic_close(); audio_stop(); video_off();   /* (whatever the app left on) */
         if (r < 0 && menu) break;
         if (!menu) pb->runs++;
         staged = r == WUP_HANDOFF_RUN;

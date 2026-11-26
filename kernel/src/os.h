@@ -135,6 +135,7 @@ int mic_open(void);
 int mic_read(short *out, int max);              /* 48 kHz mono samples since the last read */
 void mic_close(void);
 void rumble(int on);
+void video_off(void);                                   /* video and the camera off (an app ended) */
 
 /* the scratch region: 1 MB nobody else uses (big transfers: the shell's update) */
 /* spi.c: the SPI bus (UIC, flash) */
@@ -176,3 +177,32 @@ int radio_read(u32 off, void *p, u32 n);
 
 /* exc.c */
 void fault(int kind, u32 *regs, u32 spsr);
+
+/* vdec.c: the H.264 decoder and the video layer (raw CABAC slice data, as libwupstream sends it). Its memory, and the
+   camera encoder's (camera.c), is the stock's layout, 0x285000-0x3FE310: over the screens (wup_ram.h), so nothing is
+   drawn while video is open */
+int vdec_open(void);
+int vdec_frame(const void *data, u32 len, int idr);    /* 0, or < 0 dropped (then wait for a keyframe) */
+void vdec_poll(void);                                   /* often (the video task, kapi.c): the queue and the stall check */
+int vdec_need_key(void);
+int vdec_active(void);
+void vdec_fault(const char *what, u32 bits);             /* both units reset: the camera starts again after a keyframe */
+u32 vdec_waiting(void);                                 /* frames not yet decoded */
+void vdec_close(void);                                  /* the UI layer back: redraw both screens */
+extern u32 vdec_frames, vdec_keys, vdec_stalls, vdec_resets;
+extern u32 eng_keep;                                    /* ENG +0x00 bits that read back 0 but must stay set (vdec.c) */
+/* camera.c: the front camera (OV7740), raw frames or through the H.264 encoder */
+#define CAM_FRAME 0x70800u                              /* bytes in a frame buffer (codec 4:2:0 layout) */
+int cam_start(u8 *buf);                                 /* 0, or < 0; buf: CAM_FRAME bytes, 32-aligned */
+int cam_ready(void);                                    /* nonzero: a new frame is in buf (VIN idle until cam_next) */
+void cam_next(void);
+void cam_convert(u16 *dst, int stride, int mirror);    /* the frame -> 640x480 RGB565 */
+void cam_stop(void);
+int cam_regs(u8 *out);
+extern u32 cam_frames;
+int cam_enc_start(void);                                /* the camera through the H.264 encoder (also beside the decoder) */
+int cam_enc_frame(u8 *out, u32 max);                    /* often: a frame's length, 0, or < 0 (off) */
+void cam_enc_down(void);                                 /* (vdec.c's fault reset) the encoder and capture off, waiting */
+void cam_enc_restart(void);                              /* a new start: its first frame stands alone */
+void cam_enc_stop(void);
+extern u32 cam_enc_err, cam_enc_starts, cam_enc_kbps;

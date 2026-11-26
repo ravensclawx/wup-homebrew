@@ -55,6 +55,27 @@ static void k_screen_show(const void *fb) { lcd_show((u32)fb); }
 static const void *k_screen_shown(void) { return (const void *)REG(0xf0009474u); }
 /* the rumble motor: a pin, 0xF0005114 (high: on), as the stock firmware's vibrate module drives it */
 void rumble(int on) { REG(0xf0005114u) = on ? 0xc300u : 0xc200u; }
+/* video: the decoder is polled every millisecond while it is open (its queue, faults, stalls), by a task of its own */
+static int video_lock = -1;
+static void video_task(void *unused) {
+    (void)unused;
+    for (;;) {
+        if (vdec_active()) { sem_wait(video_lock, -1); vdec_poll(); sem_signal(video_lock); }
+        sched_sleep(1);
+    }
+}
+static int k_video_open(void) { sem_wait(video_lock, -1); int r = vdec_open(); sem_signal(video_lock); return r; }
+static int k_video_frame(const void *d, u32 n, int key) { sem_wait(video_lock, -1); int r = vdec_frame(d, n, key); sem_signal(video_lock); return r; }
+static int k_video_need_key(void) { return vdec_need_key(); }
+static int k_video_waiting(void) { return (int)vdec_waiting(); }
+static void k_video_close(void) { sem_wait(video_lock, -1); cam_enc_stop(); if (vdec_active()) vdec_close(); sem_signal(video_lock); }
+static u32 k_us_since_vblank(void) { return time_us() - vblank_us; }
+static int k_cam_open(u8 *buf) { return vdec_active() ? -1 : cam_start(buf); }
+static int k_cam_enc_open(void) { return vdec_active() ? cam_enc_start() : -1; }
+static int k_cam_enc_read(u8 *out, u32 max) { sem_wait(video_lock, -1); int r = cam_enc_frame(out, max); sem_signal(video_lock); return r; }
+static u32 k_cam_enc_starts(void) { return cam_enc_starts; }
+/* whatever an app left on, off (app.c, when it ends) */
+void video_off(void) { cam_stop(); k_video_close(); }
 
 static const wupk_t table = {
     WUPK_MAGIC, WUPK_VERSION,
@@ -69,6 +90,9 @@ static const wupk_t table = {
     k_screen_show, lcd_wait_vblank, &vblanks, k_screen_shown,
     audio_queue, audio_room, audio_queued, audio_stop,
     mic_open, mic_read, mic_close, rumble,
+    k_video_open, k_video_frame, k_video_need_key, k_video_waiting, k_video_close, k_us_since_vblank,
+    CAM_FRAME, k_cam_open, cam_ready, cam_next, cam_convert, cam_stop,
+    k_cam_enc_open, k_cam_enc_read, cam_enc_restart, k_cam_enc_starts, cam_enc_stop,
 };
 
 void kapi_init(void) {
@@ -76,4 +100,6 @@ void kapi_init(void) {
     radio = sem_new(1, 1);
     *(const wupk_t **)WUPK_PTR = &table;
     task_start(radio_task, NULL, NULL, 8192, 6, "radio");
+    video_lock = sem_new(1, 1);
+    task_start(video_task, NULL, NULL, 4096, 5, "video");
 }

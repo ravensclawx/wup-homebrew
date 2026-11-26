@@ -8,8 +8,7 @@
 #include "../../libwup/include/wupfmt.h"
 #include "../../libwup/third_party/tinf/src/tinf.h"
 
-#define MENU_HDR   0x000b2000u              /* the menu built for this kernel (WUP_KERNEL=1; mkflash.py --kernel-menu). Not
-                                                the menu slot at 0x30000: that one is built for Nintendo's firmware (A) */
+#define MENU_HDR   0x000b2000u              /* the menu's slot (wup-menu/tools/mkflash.py) */
 #define MENU_END   0x00100000u
 #define WMNU       0x554e4d57u
 
@@ -51,9 +50,8 @@ static int run_staged(volatile wup_handoff_t *pb) {
         if (pb->stage_raw > n || tinf_uncompress(app, &n, img, len) != TINF_OK || n != pb->stage_raw) { klog("apps: inflate failed\n"); return -1; }
         len = n;
     } else memmove(app, img, len);
-    const hb_header2 *h = (const hb_header2 *)app;
+    const hb_header *h = (const hb_header *)app;
     if (len < sizeof *h || h->magic != HB_MAGIC) { klog("apps: not an app image\n"); return -1; }
-    if (h->seg2_magic == HB_SEG2_MAGIC) { klog("apps: %s is built for Nintendo's firmware\n", (const char *)h->name); return -1; }
     if (h->entry < WUP_APP_BASE || h->entry >= WUP_APP_BASE + len) { klog("apps: bad app header\n"); return -1; }
     u32 entry = h->entry;
     klog("apps: running %s (%u KB)\n", (const char *)h->name, len >> 10);
@@ -70,6 +68,7 @@ void apps_run(void *unused) {
         if (!staged && !stage_menu(pb)) break;
         int menu = !staged;
         int r = run_staged(pb);
+        rumble(0); mic_close(); audio_stop();            /* (whatever the app left on) */
         if (r < 0 && menu) break;
         if (!menu) pb->runs++;
         staged = r == WUP_HANDOFF_RUN;

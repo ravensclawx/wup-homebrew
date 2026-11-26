@@ -328,60 +328,12 @@ int wifi_var(const char *name, void *v, u32 n, int set) {
 }
 static int var32(const char *name, u32 v) { return wifi_var(name, &v, 4, 1); }
 
-/* The backplane needs the chip's ALP clock. From a cold power-on it runs by itself; after Nintendo's firmware (the
-   kernel starts from its hook) the radio was left in a low-power state where reads of the backplane fail until the
-   clock is asked for, and a plain request may not be enough. Ways tried in turn, each logged with what it did (the
-   first that gives ALP_AVAIL wins); afterwards the backplane is read as usual. */
-static int alp(u32 us) { u8 v = 0; for (u32 t = time_us(); time_us() - t < us; ) if (!sdio_read8(1, CLKCSR, &v) && (v & 0x40)) return 1; return 0; }
-static void wake_clock(void) {
+/* what the card reports before the bring-up (the log: a radio in an unexpected state shows here first) */
+static void card_state(void) {
     u8 c[8] = { 0 }, v = 0;
     for (int i = 0; i < 8; i++) sdio_read8(0, (u32)i, &c[i]);
     sdio_read8(1, CLKCSR, &v);
     klog("wifi: CCCR %02x %02x %02x %02x %02x %02x %02x %02x, clock CSR %02x\n", c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], v);
-    if (v & 0x40) { klog("wifi: ALP already on\n"); return; }
-    {   /* the SDIO core asleep (its function-1 registers do not answer; only the card's own CCCR does): woken by "keep
-           SDIO on" (SLEEPCSR 0x1001F bit 0), written until it holds, as Broadcom's drivers wake a chip from deep sleep */
-        u8 k = 0xee;
-        int e1 = sdio_read8(1, 0x1001f, &k);
-        klog("wifi: SLEEPCSR %02x (%d)\n", k, e1);
-        for (int i = 0; i < 40; i++) {
-            sdio_write8(1, 0x1001f, 1);
-            delay_ms(5);
-            k = 0xee;
-            if (!sdio_read8(1, 0x1001f, &k) && (k & 1)) { klog("wifi: awake after %d tries (SLEEPCSR %02x)\n", i + 1, k); break; }
-        }
-        sdio_read8(1, CLKCSR, &v);
-        klog("wifi: then clock CSR %02x\n", v);
-        if (v & 0x40) return;
-    }
-    u8 f1[32];
-    for (int i = 0; i < 32; i++) { f1[i] = 0xee; sdio_read8(1, 0x10000u + (u32)i, &f1[i]); }
-    klog("wifi: F1 10000:");
-    for (int i = 0; i < 32; i++) klog(" %02x", f1[i]);
-    klog("\n");
-    if (f1[9]) {                                     /* DEVICE_CTL: pads isolated (0x08) or the backplane held in reset
-                                                        (0x30) for power saving: back to normal */
-        sdio_write8(1, 0x10009, 0); delay_ms(5);
-        u8 d = 0xee; sdio_read8(1, 0x10009, &d);
-        sdio_write8(1, CLKCSR, 0x28);
-        int ok = alp(100000);
-        sdio_read8(1, CLKCSR, &v);
-        klog("wifi: device control %02x -> %02x, then ALP asked: CSR %02x%s\n", f1[9], d, v, ok ? " - ALP on" : "");
-        if (ok) return;
-    }
-    static const struct { u8 csr; const char *what; } way[] = {
-        { 0x28, "ALP asked (hardware request off)" }, { 0x21, "ALP forced" }, { 0x08, "ALP asked" }, { 0x09, "ALP asked and forced" },
-        { 0x10, "HT asked" }, { 0x18, "HT and ALP asked" },
-    };
-    for (u32 i = 0; i < sizeof way / sizeof way[0]; i++) {
-        sdio_write8(1, CLKCSR, 0); delay_ms(2);
-        sdio_write8(1, CLKCSR, way[i].csr);
-        int ok = alp(100000);
-        sdio_read8(1, CLKCSR, &v);
-        klog("wifi: %s: CSR %02x%s\n", way[i].what, v, ok ? " - ALP on" : "");
-        if (ok) return;
-    }
-    klog("wifi: no ALP by asking\n");
 }
 
 /* ---- bring-up: the stock driver's sequence (dhd, LVC 0x3d000-0x48000; traced in the emulator on a model of the pad's
@@ -411,7 +363,7 @@ int wifi_up(void) {
     window = 0xffffffffu;
     int restarted = 0;
 again:;
-    wake_clock();
+    card_state();
     u32 id = rd(CHIPBASE);
     klog("wifi: chip %04x rev %u, %s backplane\n", id & 0xffff, id >> 16 & 15, id >> 28 == 1 ? "AXI" : "Sonics");
     for (u32 t = time_us(), n = 0; (e = sdio_write8(1, CLKCSR, 0x28)); n++) {   /* ALP requested, the hardware clock
@@ -555,7 +507,6 @@ again:;
     wifi_ioctl(20, &one, 4, 1);                            /* SET_INFRA */
     var32("mpc", 0);
     if (wifi_ioctl(2, &one, 4, 1)) { klog("wifi: WLC_UP failed\n"); return -7; }    /* WLC_UP */
-    /* (the CFW waited 500 ms here; the streamer goes on at once: a test, 2026-11-25) */
     var32("a_mrate", 12);                                  /* 5 GHz rates pinned: 6 Mbit/s multicast, 54 unicast */
     var32("a_rate", 108);
     u32 pm = 0;

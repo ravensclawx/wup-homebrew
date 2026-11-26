@@ -6,7 +6,7 @@
  * Received bytes are only queued in the lwIP callback; commands run from dbgsrv_step() in the menu's
  * loop (outside lwIP), which may poll the network itself while it waits to send.
  * Anyone on the network can read/write/call anything: it is a development tool (Settings switch). */
-#include "wup_flash.h"
+#include "wupk.h"
 #include <stdint.h>
 #include <string.h>
 #include "lwip/tcp.h"
@@ -15,18 +15,15 @@
 #include "armcpu.h"
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32;
 #include "wup.h"
-#define FLBUF ((u8 *)0x0034e000u)                /* uncached, DMA-reachable: libwup's flash bounce buffer (4 KB) */
-#ifdef WUP_KERNEL
+static u8 FLBUF[4096] __attribute__((aligned(4)));   /* (a flash read, 4 KB at a time) */
 #include "wupk.h"
 #define DLY(ms) WUPK->sleep(ms)
-#else
-#define DLY ((void (*)(int))0x00089ae4)
-#endif
 #define MAXLEN 0x20000u
 
 static struct tcp_pcb *listener, *conn;
 static char inq[2048]; static u32 inq_n;
 static int wb_active; static u8 *wb_dst; static u32 wb_left, wb_len, wb_crc, wb_want;
+static u8 fw_buf[4096] __attribute__((aligned(4))); static u32 fw_addr, fw_on;   /* an fw: one sector, then flashed */
 static u32 ncmds;
 
 
@@ -122,8 +119,8 @@ static void run(char *line) {
         puts_("DATA "); hex_(b, 8); puts_("\n");
         u32 crc = 0;
         for (u32 o = 0; o < b; o += 4096) {
-            u32 k = b - o < 4096 ? b - o : 4096, done = 0;
-            if (FL_READ(FL_HANDLE, a + o, FLBUF, k, &done)) memset(FLBUF, 0, k);
+            u32 k = b - o < 4096 ? b - o : 4096;
+            if (WUPK->flash_read(a + o, FLBUF, k)) memset(FLBUF, 0, k);
             crc = crc32_update(crc, FLBUF, k); out(FLBUF, k);
         }
         puts_("OK "); hex_(crc, 8); puts_("\n");
@@ -131,6 +128,12 @@ static void run(char *line) {
     else if (eq(c, "wb")) {
         if (!num(&a) || !num(&b) || !num(&wb_want) || b > MAXLEN) { err("usage: wb ADDR LEN CRC32"); return; }
         wb_dst = (u8 *)a; wb_left = wb_len = b; wb_crc = 0; wb_active = b ? 1 : 2;
+        puts_("GO\n");
+    }
+    else if (eq(c, "fw")) {                                     /* one 4 KB flash sector: erased, written, read back */
+        if (!num(&a) || !num(&b) || !num(&wb_want) || (a & 0xfff) || !b || b > 4096) { err("usage: fw SECTORADDR LEN CRC32"); return; }
+        fw_addr = a; fw_on = 1;
+        wb_dst = fw_buf; wb_left = wb_len = b; wb_crc = 0; wb_active = 1;
         puts_("GO\n");
     }
     else if (eq(c, "call")) {
@@ -141,15 +144,23 @@ static void run(char *line) {
         puts_("OK "); hex_((u32)res, 8); puts_(" "); hex_((u32)(res >> 32), 8); puts_("\n");
     }
     else if (eq(c, "sleep")) { if (!num(&a)) a = 1; DLY((int)a); ok(); }
-    else err("unknown command (ping info r8 r16 r32 w8 w16 w32 rb wb fr call sleep)");
+    else err("unknown command (ping info r8 r16 r32 w8 w16 w32 rb wb fr fw call sleep)");
 }
 
 void dbgsrv_step(void) {
     if (!conn) return;
-    if (wb_active == 2) {                                       /* a wb finished arriving */
+    if (wb_active == 2) {                                       /* a wb (or fw) finished arriving */
         wb_active = 0;
-        sync_code((u32)(wb_dst - wb_len), wb_len);
-        if (wb_crc == wb_want) ok(); else { puts_("ERR crc "); hex_(wb_crc, 8); puts_("\n"); }
+        if (wb_crc != wb_want) { fw_on = 0; puts_("ERR crc "); hex_(wb_crc, 8); puts_("\n"); }
+        else if (fw_on) {
+            static u8 back[4096];
+            fw_on = 0;
+            if (WUPK->flash_erase4k(fw_addr)) err("erase failed");
+            else if (WUPK->flash_write(fw_addr, fw_buf, wb_len)) err("write failed");
+            else if (WUPK->flash_read(fw_addr, back, wb_len) || memcmp(back, fw_buf, wb_len)) err("read-back differs");
+            else ok();
+        }
+        else { sync_code((u32)(wb_dst - wb_len), wb_len); ok(); }
     }
     if (wb_active) return;
     for (;;) {                                                  /* one complete line at a time */

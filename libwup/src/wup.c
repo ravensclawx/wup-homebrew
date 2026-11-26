@@ -2,37 +2,25 @@
 #include <setjmp.h>
 #include <stdlib.h>
 #include "wup.h"
-#include "mmu.h"
 #include "wup_hw.h"
 #include "armcpu.h"
 typedef uint32_t u32; typedef uint8_t u8; typedef uint16_t u16;
 #define REG(a) (*(volatile u32 *)(a))
 #define LCD(o) REG(0xf0009400u + (o))
 #define HWCLK REG(0xf0000408u)
-#ifdef WUP_KERNEL                                    /* (the wup-homebrew kernel: include/wupk.h) */
 #include "wupk.h"
 #define FW_DLY(ms) WUPK->sleep(ms)
 #define FW_REPORT  (WUPK->report)
-#define FW_BUTTONS (WUPK->report + 2)                 /* (the report's buttons, big-endian, as Nintendo's copy) */
-#else
-#define FW_DLY ((void (*)(int))0x00089ae4)            /* RTOS task delay (ARM code) */
-#define FW_BUTTONS ((const volatile u8 *)0x000bdab0u)
-#define FW_REPORT  ((const volatile u8 *)0x00178d38u)
-#endif
+#define FW_BUTTONS (WUPK->report + 2)                 /* (the report's buttons, big-endian) */
 
-extern u8 __bss_start[], __bss_end[], __bss2_start[], __bss2_end[];
-#ifdef WUP_KERNEL
+extern u8 __bss_start[], __bss_end[];
 #define STACK_WORDS 16384                              /* 64 KB: the app block has room */
-#else
-#define STACK_WORDS 6144                               /* 24 KB, in the app area */
-#endif
 static u32 stack[STACK_WORDS] __attribute__((aligned(8), section(".bss.stack")));
 static int fs_state, screen_on, lcd8_saved, ret;
 static u32 lcd8[3];
 void wup__kernel_exit(void);
 void wup__time_start(void), wup__time_end(void);
 static void copy_boot(void);
-static void uart_init(void);
 static int stage_exec(void);
 static char exec_path[96];
 static jmp_buf exit_jb;
@@ -52,19 +40,10 @@ __attribute__((noinline)) static void run_on_stack(void (*f)(void), void *top) {
                      :: "r"(f), "r"(top) : "r0", "r1", "r2", "r3", "r4", "r12", "lr", "memory", "cc");
 }
 static void app_main(void) {
-    /* our own memory, cached while we run (ui/mmu.c restores the firmware's mapping) */
-    mmu_cache(0x350000, 0x380000);                     /* code, data, stack */
-    mmu_cache(0x190000, 0x200000);                     /* big memory: 64 KB pages of a coarse table */
-    mmu_cache_section(0x200000, 0x2fa000);             /* big memory in the 2-3 MB section; not the Wi-Fi driver's above it */
-    mmu_cache(0x390000, 0x3e0000);                     /* most of the firmware's 8bpp framebuffer */
-    /* apps fade in and out: black until the first frame is shown (fade_in_now), fade out on return */
+    /* apps fade in and out: the screen is dark between apps (the kernel keeps it so); the first frame is drawn unseen,
+       then faded in (fade_in_now) */
     gfx_brightness(0);
     fade_pending = 1; gfx_present_hook = fade_in_now;
-#ifdef WUP_KERNEL
-    gfx_brightness(0);                                 /* (dark already: the kernel keeps it so between apps) the first
-                                                          frame is drawn unseen, then faded in */
-#endif
-    uart_init();
     copy_boot();
     for (int i = 0; i < 4; i++) {                      /* the sticks at rest: each pad's are a little off centre */
         int v = (int)(FW_REPORT[6 + 2 * i] | FW_REPORT[7 + 2 * i] << 8) - 0x800;
@@ -73,12 +52,10 @@ static void app_main(void) {
     int formatted = 0;
     fs_state = fs_mount(&formatted) == 0;              /* built with FS_NO_FORMAT: never formats */
     wup__time_start();
-    extern int wup__big_load(void) __attribute__((weak));   /* (big.c: only in apps with code for WUP_BIGMEM) */
-    if (wup__big_load && wup__big_load()) ret = 1;
-    else if (!setjmp(exit_jb)) { fade_t0 = HWCLK; ret = main(); }   /* (exit() and abort() come back here; the fade's 0.3 s
+    if (!setjmp(exit_jb)) { fade_t0 = HWCLK; ret = main(); }   /* (exit() and abort() come back here; the fade's 0.3 s
                                                        count from here: mounting a fresh filesystem can take longer) */
     wup__time_end();
-    wup_audio_close();                                 /* (first: its thread) */
+    wup_audio_close();
     if (wup__net_exit) wup__net_exit();                /* sockets closed, lwIP's threads stopped, the radio's frames dropped
                                                           again: first, as lwIP's threads never end (waiting for them
                                                           below cost every networked app a second to close) */
@@ -86,38 +63,26 @@ static void app_main(void) {
     hw_reset();                                        /* the motor and the microphone off, the menu's brightness */
     gfx_present_hook = 0;
     if (!fade_pending) gfx_fade(256, 0);               /* fade out (unless it never faded in) */
-    if (screen_on) gfx_end();                          /* (clears the firmware layer to black) */
-    if (lcd8_saved) {                                  /* the firmware layer still shows our last frame: black it */
+    if (screen_on) gfx_end();
+    if (lcd8_saved) {                                  /* the 8-bit screen: cleared, the RGB565 layer back for the next app */
         u8 *f = (u8 *)LCD(0x74); u32 n = LCD(0x70) * GFX_H;
         for (u32 i = 0; i < n; i += 4) *(u32 *)(f + i) = 0;
         cache_clean(f, n);
         LCD(0x100) = 0; LCD(0x104) = 0xff000000u;
         wup_vblank(); LCD(0xb0) = lcd8[0]; LCD(0x70) = lcd8[1]; LCD(0x74) = lcd8[2];
     }
-#ifndef WUP_KERNEL
-    gfx_brightness(256);                               /* the normal curve again: the screen is black */
-#else
-    gfx_brightness(0);                                 /* dark until the next app fades in (one layer here, no black
-                                                          firmware screen to switch to) */
-#endif
+    gfx_brightness(0);                                 /* dark until the next app fades in */
     if (exec_path[0]) ret = stage_exec() ? 0 : WUP_HANDOFF_RUN;   /* the screen's memory is free now: the next app into it */
 }
-/* The loader jumps here (it must be in the first segment, 0x350000..). A large app's second segment
-   (WUP_SPARE) was written by the menu through the D-cache: write the whole D-cache back and drop the
-   I-cache before any of it runs (ARM926 test-and-clean). */
+/* The kernel's app runner calls this (kernel/src/app.c): the image is in place and the caches are in step with it.
+   .bss cleared, then the app on libwup's own stack. */
 __attribute__((section(".text.entry"), target("arm"), noinline)) int _wup_entry(void) {
-    __asm__ volatile("1: mrc p15, 0, apsr_nzcv, c7, c10, 3\n\tbne 1b\n\t"
-                     "mcr p15, 0, %0, c7, c10, 4\n\tmcr p15, 0, %0, c7, c5, 0" :: "r"(0) : "memory", "cc");
     for (u8 *p = __bss_start; p < __bss_end; p++) *p = 0;
-#ifndef WUP_KERNEL
-    for (u32 *p = (u32 *)__bss2_start; p < (u32 *)__bss2_end; p++) *p = 0;   /* large apps: .bss in WUP_BIGMEM */
-#endif
     run_on_stack(app_main, stack + STACK_WORDS);
-    mmu_uncache_all();                                 /* back on the loader's stack, outside our pages */
     return ret;
 }
 
-/* ---- starting another app: its code (as stored in its .wup, deflated) goes to the stage for the loader, once this app
+/* ---- starting another app: its code (as stored in its .wup, deflated) goes to the stage for the kernel, once this app
    has ended and the screen's memory is free (include/handoff.h) */
 #include "wupfmt.h"
 static char exec_arg[192];
@@ -126,14 +91,10 @@ int wup_exec(const char *path, const char *arg) {
     wup_hdr_t *h = &exec_hdr;
     memset(h, 0, sizeof *h);
     int n = fs_read(path, 0, h, sizeof *h);
-    if (n < WUP_HDR_V1 || h->magic != WUP_MAGIC || !h->code_size || h->code_size > 0xd9000u) return -1;
+    if (n < WUP_HDR_V1 || h->magic != WUP_MAGIC || !h->code_size || h->code_size > WUP_STAGE_MAX) return -1;
     if (h->hdr_size < WUP_HDR_V3) h->code_raw = h->flags = 0;
     if (h->code_raw > WUP_HANDOFF_WORK_MAX) return -2;
-#ifdef WUP_KERNEL
-    if (!(h->flags & WUP_FLAG_KERNEL)) return -3;       /* built for Nintendo's firmware: not runnable here */
-#else
-    if (h->flags & WUP_FLAG_KERNEL) return -3;          /* built for the wup-homebrew kernel */
-#endif
+    if (!(h->flags & WUP_FLAG_KERNEL)) return -3;       /* a v1 app (built for Nintendo's firmware): not runnable */
     strncpy(exec_path, path, sizeof exec_path - 1);
     strncpy(exec_arg, arg ? arg : "", sizeof exec_arg - 1);
     return 0;
@@ -183,12 +144,10 @@ px_t *wup_screen(void) {
 u8 *wup_screen8(void) {
     if (screen_on) { gfx_end(); screen_on = 0; }
     if (!lcd8_saved) { lcd8[0] = LCD(0xb0); lcd8[1] = LCD(0x70); lcd8[2] = LCD(0x74); lcd8_saved = 1;
-#ifdef WUP_KERNEL                                      /* no firmware layer here: our own 8-bit screen (wup_ram.h), the
-                                                          UI layer switched to it the way the stock firmware ran its own
-                                                          (format 0x00FF0008: 8-bit paletted, the stride in bytes) */
+        /* our own 8-bit screen (wup_ram.h), the UI layer switched to it the way the stock firmware ran its own (format
+           0x00FF0008: 8-bit paletted, the stride in bytes) */
         memset((void *)WUP_FB8, 0, 864u * GFX_H); cache_clean((void *)WUP_FB8, 864u * GFX_H);
         wup_vblank(); LCD(0x70) = 864; LCD(0x74) = WUP_FB8; LCD(0xb0) = 0x00ff0008u;
-#endif
     }
     return (u8 *)LCD(0x74);
 }
@@ -196,86 +155,13 @@ u32 wup_stride8(void) { return LCD(0x70); }
 void wup_palette(int i, u32 rgb) { LCD(0x100) = (u32)i; LCD(0x104) = 0xff000000u | rgb; }
 void wup_present8(int y, int h) { u32 s = LCD(0x70); cache_clean((u8 *)LCD(0x74) + (u32)y * s, (u32)h * s); fade_in_now(); }
 
-/* ---- audio: the audio block (0xF0005400) loops over our ring at 48 kHz (measured on the pad: 192000 bytes a second);
-   we write just ahead of the play position, and what has been played is cleared at once, or the ring would play it
-   again 0.24 s later. That clearing, and noticing when everything queued has been played, is done by a small thread
-   of its own every 5 ms, so it happens even while the app is busy (the menu bringing up the radio, a long drawing).
-   Its PLAY_CNT (+0x20) bit 0 mutes; bit 2 (STOP) wedges an idle engine and is never used. The ring is in the
-   loader's slot (uncached, DMA-reachable, unused by the loader while the app runs). */
-#define AU(o) REG(0xf0005400u + (o))
-#ifdef WUP_KERNEL
-#define RING ((int16_t *)WUP_SOUND_RING)                /* the kernel's sound ring (wup_ram.h), the same size */
-#else
-#define RING ((int16_t *)0x00342000u)
-#endif
-#define RFRAMES 11520                                  /* 0.24 s: 0x342000..0x34D000 */
-#define RBYTES (RFRAMES * 4)
-#define LEAD 1600                                      /* a new sound starts this far ahead of the play position (33 ms) */
-#define ROOM (RFRAMES - LEAD - 480)                    /* never more queued than this: the keeper's 5 ms and a margin */
-static volatile int au_on, au_run, au_clr, au_wr = -1, au_left;     /* au_wr < 0: nothing queued */
-static int au_keeper = -1;
-static int au_pos(void) { u32 p = (AU(0x14) & 0xffffff) - (u32)RING; return p < RBYTES ? (int)(p >> 2) : -1; }
-static int ring_dist(int a, int b) { int d = b - a; return d < 0 ? d + RFRAMES : d; }   /* a -> b */
-static void au_tick(void) {                            /* (interrupts off) clear what was played; see the end of the queue */
-    int p = au_pos(); if (p < 0) return;
-    u32 *r = (u32 *)RING;
-    while (au_clr != p) { r[au_clr] = 0; if (++au_clr == RFRAMES) au_clr = 0; }
-    if (au_wr >= 0) {
-        int d = ring_dist(p, au_wr);
-        if (d > au_left) au_wr = -1;                   /* it went up: the play position has passed the end */
-        else au_left = d;
-    }
-}
-static void au_keep(void *arg) {
-    (void)arg;
-    while (au_run) { unsigned st = wup_irq_off(); au_tick(); wup_irq_restore(st); wup_thread_sleep(5); }
-}
-int wup_audio_open(void) {
-    if (au_on) return 0;
-    AU(0x2c) = 0; AU(0x30) = 0x3f;                     /* the firmware's refill off */
-    AU(0x20) = (AU(0x20) & ~4u) | 1;                   /* muted while we set up */
-    memset(RING, 0, RBYTES);
-    AU(0x00) &= ~(7u << 22);                           /* PCM16, 48 kHz */
-    AU(0x04) &= ~0x80u;                                /* stereo */
-    AU(0x08) = (u32)RING; AU(0x0c) = (u32)RING + RBYTES;
-    AU(0x24) = RBYTES >> 4;
-    AU(0x10) = (u32)RING + RBYTES;                     /* loop over the ring */
-    wup_sleep(4); int p0 = au_pos(); wup_sleep(4); int p1 = au_pos();
-    if (p0 < 0 || p1 < 0 || p0 == p1) return -1;       /* not playing our ring: stay muted */
-    au_clr = p1; au_wr = -1; au_left = 0; au_on = 1;
-    au_run = 1; au_keeper = wup_thread_start(au_keep, 0, 2048, 2);
-    AU(0x20) &= ~5u;
-    return 0;
-}
-int wup_audio_queued(void) {
-    if (!au_on) return 0;
-    unsigned st = wup_irq_off(); au_tick(); int n = au_wr < 0 ? 0 : au_left; wup_irq_restore(st);
-    return n;
-}
-int wup_audio_room(void) { return au_on ? ROOM - wup_audio_queued() : 0; }
-int wup_audio_queue(const int16_t *lr, int n) {
-    if (!au_on || n <= 0) return 0;
-    unsigned st = wup_irq_off();
-    au_tick();
-    int p = au_pos();
-    if (p < 0) { wup_irq_restore(st); return 0; }
-    if (au_wr < 0) { au_wr = p + LEAD >= RFRAMES ? p + LEAD - RFRAMES : p + LEAD; au_left = LEAD; }
-    if (n > ROOM - au_left) n = ROOM - au_left;
-    const u32 *s = (const u32 *)lr; u32 *r = (u32 *)RING;
-    for (int i = 0; i < n; i++) { r[au_wr] = s[i]; if (++au_wr == RFRAMES) au_wr = 0; }
-    au_left += n;
-    wup_irq_restore(st);
-    return n;
-}
-void wup_audio_close(void) {
-    if (!au_on) return;
-    au_run = 0;
-    if (au_keeper >= 0 && wup_thread_join(au_keeper, 100)) wup_thread_kill(au_keeper);
-    au_keeper = -1;
-    AU(0x20) |= 1;                                     /* mute; the engine keeps looping over silence */
-    memset(RING, 0, RBYTES);
-    au_on = 0; au_wr = -1;
-}
+/* ---- audio: the kernel's (wupk.h): it keeps the ring at 48 kHz, clears what has been played and drops what is left
+   when the app ends. The volume slider applies (the kernel) */
+int wup_audio_open(void) { return WUPK->audio_room() > 0 ? 0 : -1; }
+int wup_audio_queue(const int16_t *lr, int frames) { return WUPK->audio_queue(lr, frames); }
+int wup_audio_queued(void) { return WUPK->audio_queued(); }
+int wup_audio_room(void) { return WUPK->audio_room(); }
+void wup_audio_close(void) { WUPK->audio_stop(); }
 
 /* Each button's change is taken at once, and then that button is not listened to for 25 ms: a contact that bounces as
    it closes or opens is one press, not two, and nothing is delayed. */
@@ -339,31 +225,9 @@ void wup_sleep(int ms) {
 }
 
 
-/* ---- status (as the Homebrew Menu reads it, wup-menu: menu/ui/sys.c and wifi_hw.c). The UIC (the pad's microcontroller)
-   answers one-byte queries through the firmware's driver: state block at 0x13434 (byte 0 = 1 when ready,
-   +4 = driver context, whose +0x10 is the command buffer), semaphore 0x1b (wai_sem 0x8b64c / sig_sem
-   0x8ae1e), transfer 0x115f4(ctx, ntx, nrx, rx). UIC 0x10 = battery level 0..6; the input report's byte 4
-   bit 6 = charging. The signal: the radio driver's ioctl 0x1b164(cmd, buf, len, set), WLC_GET_RSSI = 127. */
-#define WAI_SEM  ((int (*)(int, int))0x0008b64d)
-#define SIG_SEM  ((int (*)(int))0x0008ae1f)
-#define UIC_XFER ((int (*)(u32, int, int, u8 *))0x000115f5)
-#define WL_IOCTL ((int (*)(u32, void *, u32, u32))0x0001b165)
-#ifdef WUP_KERNEL
+/* ---- status: the UIC (the pad's microcontroller) through the kernel: 0x10 = battery level 0..6; the input report's
+   byte 4 bit 6 = charging. The signal: the radio's WLC_GET_RSSI (127) */
 static int uic_query(int cmd) { u8 c = (u8)cmd, v = 0; return WUPK->uic(&c, 1, &v, 1) ? -1 : v; }
-#else
-static int uic_query(int cmd) {
-    u32 st = *(volatile u32 *)0x00013434u;
-    if (!st || *(volatile u8 *)st != 1) return -1;
-    u32 ctx = *(volatile u32 *)(st + 4);
-    if (!ctx || WAI_SEM(0x1b, -1)) return -1;
-    u8 *buf = *(u8 **)(ctx + 0x10);
-    buf[0] = (u8)cmd;
-    UIC_XFER(ctx, 1, 1, buf + 1);
-    int v = buf[1];
-    SIG_SEM(0x1b);
-    return v;
-}
-#endif
 int wup_battery(int *charging) {
     int chg = (FW_REPORT[4] >> 6) & 1;                                  /* (the input report, byte 4) */
     if (charging) *charging = chg;
@@ -374,31 +238,15 @@ int wup_battery(int *charging) {
 int wup_wifi_rssi(void) {
     static int buf[8] __attribute__((aligned(32)));
     buf[0] = 0; cache_flush(buf, sizeof buf);
-#ifdef WUP_KERNEL
     int r = WUPK->wifi_ioctl(127, buf, 4, 0);
-#else
-    int r = WL_IOCTL(127, buf, 4, 0);
-#endif
     cache_flush(buf, sizeof buf);
     return r || buf[0] >= 0 ? 0 : buf[0];
 }
 
-/* UART1 (the battery-cover header), 115200 8N1, as the firmware's boot ROM loader leaves it wired; the stock
-   firmware does not use it. Set up once per app: every wait has a timeout, so nothing hangs without a cable. */
-static void uart_init(void) {
-    REG(0xf00050d4) = 0x8001; REG(0xf00050d8) = 0x0801;           /* pins: UART1 TX / RX */
-    REG(0xf0000058) |= 1u << 8; REG(0xf0000044) = 8 - 1; REG(0xf0000058) &= ~(1u << 8);   /* reset; 32 MHz / 8 */
-    REG(0xf0004c70) = 1;
-    REG(0xf0004c64) = 1; REG(0xf0004c68) = 288; REG(0xf0004c6c) = 625;   /* 115200 baud */
-    REG(0xf0004c50) = 0; REG(0xf0004c54) = 3; REG(0xf0004c58) = 0; REG(0xf0004c48) = 0;   /* 8N1, no interrupts */
-}
-static void uputc(char c) {
-    for (int i = 0; i < 100000 && !(REG(0xf0004c5c) & 0x20); i++) ;
-    REG(0xf0004c44) = (u8)c;
-}
-void (*wup__net_log)(const char *s);                  /* networking: the same text over Wi-Fi (net.c) */
+/* the log: the kernel's (the UART on the battery-cover header), and the same text over Wi-Fi while networking runs */
+void (*wup__net_log)(const char *s);                  /* (net.c) */
 void wup_log(const char *s) {
     if (wup__net_log) wup__net_log(s);
-    while (*s) { if (*s == '\n') uputc('\r'); uputc(*s++); }
+    WUPK->log(s);
 }
 void wup_log_hex(u32 v) { char b[9]; for (int i = 0; i < 8; i++) { int d = v >> (28 - 4 * i) & 15; b[i] = (char)(d < 10 ? '0' + d : 'a' + d - 10); } b[8] = 0; wup_log(b); }

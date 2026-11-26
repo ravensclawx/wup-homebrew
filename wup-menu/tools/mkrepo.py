@@ -6,10 +6,9 @@ packages/<name>/icon.png. Publish the folder as it is (a web server over HTTPS, 
     python3 tools/mkrepo.py [OUT]          -> build/repo
 
 The packages: the apps below, each zip holding apps/<id>/<id>.wup (the Homebrew Menu's layout), and the Homebrew Menu
-itself as "homebrew_menu" (category system), its zip holding homebrew_menu.bin: the menu slot as stored (a 4 KB header
-sector {"WMNU", stored size, crc32, inflated size, stamp}, then the deflated menu). With WUP_KERNEL=1 (the
-wup-homebrew kernel: every app built for it) the zip holds kernel.bin first, the kernel's slot as stored (a 4 KB
-header sector {"GPST", size, crc32}, then the kernel), and homebrew_menu.bin is the kernel's menu slot."""
+itself as "homebrew_menu" (category system), its zip holding kernel.bin first, the kernel's slot as stored (a 4 KB
+header sector {"GPST", size, crc32}, then the kernel), and homebrew_menu.bin, the menu's slot as stored (a 4 KB header
+sector {"WMNU", stored size, crc32, inflated size, stamp}, then the deflated menu): Software Update writes both."""
 import datetime, hashlib, io, json, os, re, shutil, subprocess, sys, zipfile
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import paths
@@ -69,20 +68,14 @@ def main():
                             licence, [('apps/%s/%s.wup' % (wid, wid), wup, zipfile.ZIP_STORED)]
                             + [('apps/%s/%s' % (wid, name), made(os.path.join(d, sub)) if sub.endswith('.py') else built(os.path.join(d, sub)), zipfile.ZIP_STORED) for sub, name in (more[0] if more else [])], icon, c.get('url', HOME)))
         print('  %-18s %s' % (wid, c.get('version')))
-    from mkflash import build_menu, menu_header        # the Homebrew Menu itself (stored: it is deflated already)
-    menu, stored = build_menu()
+    from mkflash import kernel_slot, menu_slot         # the system: the kernel and the Homebrew Menu, in one package
     version = re.search(r'MENU_VERSION="([^"]+)"', open(os.path.join(ROOT, 'menu', 'app.cfg')).read()).group(1)
     for w in os.environ.get('WUP_DEFINES', '').split():
         if w.startswith('MENU_VERSION='): version = w.split('=', 1)[1].strip('"')
-    if paths.KERNEL:                                    # (WUP_KERNEL=1: the kernel and its menu, kernel.bin first)
-        from mkflash import system_slot, kernel_menu_slot
-        kdir = os.path.join(PROJECTS, 'kernel')
-        subprocess.run(['make', '-C', kdir], check=True, capture_output=True)
-        kernel = system_slot(open(os.path.join(kdir, 'build', 'kernel.bin'), 'rb').read())
-        files = [('kernel.bin', kernel, zipfile.ZIP_STORED),
-                 ('homebrew_menu.bin', kernel_menu_slot(built(os.path.join(ROOT, 'menu'))), zipfile.ZIP_STORED)]
-    else:
-        files = [('homebrew_menu.bin', menu_header(menu, stored).ljust(0x1000, b'\xff') + stored, zipfile.ZIP_STORED)]
+    kdir = os.path.join(PROJECTS, 'kernel')
+    subprocess.run(['make', '-C', kdir], check=True, capture_output=True)
+    files = [('kernel.bin', kernel_slot(open(os.path.join(kdir, 'build', 'kernel.bin'), 'rb').read()), zipfile.ZIP_STORED),
+             ('homebrew_menu.bin', menu_slot(built(os.path.join(ROOT, 'menu'))), zipfile.ZIP_STORED)]
     packages.append(pkg(out, 'homebrew_menu', 'Homebrew Menu', 'wup-homebrew', version, 'system', 'The Homebrew Menu',
                         'GPL-3.0-or-later', files, None, HOME))
     print('  %-18s %s' % ('homebrew_menu', version))

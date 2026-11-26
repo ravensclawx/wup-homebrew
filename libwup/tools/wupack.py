@@ -11,8 +11,7 @@ Format: include/wupfmt.h."""
 import os, struct, sys, zlib
 ICON = 64
 HDR_V2, HDR_V3 = 208, 216
-HDR_V4 = 236                       # + the code for WUP_BIGMEM (wupfmt.h)
-BIGMEM = 0x190000
+HDR_V4 = 236                       # (+ 5 reserved words: v1 code for big memory, 0 now)
 
 
 def deflate(data):
@@ -36,23 +35,18 @@ def make_icon(path):
     return rgb565(bg)
 
 
-def pack(code, name, author='', version='1.0', icon=None, description='', big=b'', kernel=None):
-    if kernel is None:
-        import paths; kernel = paths.KERNEL                # (flags: WUP_FLAG_KERNEL, include/wupfmt.h)
+def pack(code, name, author='', version='1.0', icon=None, description=''):
+    """an app image -> a .wup: the header (flags: WUP_FLAG_KERNEL, include/wupfmt.h), the code deflated, the icon"""
     if code[:4] != b'HBRW': raise ValueError('the code is not an app image (no HBRW header)')
     iconpix = make_icon(icon) if icon else b''
     raw = len(code); code = deflate(code)                 # stored deflated; the CRC is of what is stored
-    big_raw = len(big); big = deflate(big) if big else b''
     code_off = HDR_V4
-    big_off = (code_off + len(code) + 3) & ~3 if big else 0
-    icon_off = ((big_off + len(big) if big else code_off + len(code)) + 3) & ~3 if iconpix else 0
+    icon_off = (code_off + len(code) + 3) & ~3 if iconpix else 0
     hdr = struct.pack('<IIIIIIII32s32s16s96sIIIIIII', 0x30505557, HDR_V4, code_off, len(code), zlib.crc32(code) & 0xffffffff,
                       icon_off, ICON if iconpix else 0, ICON if iconpix else 0, name.encode()[:31], author.encode()[:31],
-                      version.encode()[:15], description.encode()[:95], raw, 1 if kernel else 0,
-                      BIGMEM if big else 0, big_off, len(big), big_raw, zlib.crc32(big) & 0xffffffff if big else 0)
+                      version.encode()[:15], description.encode()[:95], raw, 1, 0, 0, 0, 0, 0)
     assert len(hdr) == HDR_V4
     out = hdr + code
-    if big: out += b'\0' * (big_off - len(out)) + big
     if iconpix: out += b'\0' * (icon_off - len(out)) + iconpix
     return out
 

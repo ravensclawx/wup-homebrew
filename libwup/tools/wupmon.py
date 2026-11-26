@@ -183,6 +183,17 @@ class WupMon:
     def read(self, addr, n, progress=True): return self._bulk('rb', addr, n, progress)
     def flash(self, addr, n, progress=True): return self._bulk('fr', addr, n, progress)
 
+    def flash_write(self, sector, data):
+        """one 4 KB flash sector (Developer Mode over Wi-Fi): erased, written, read back on the pad"""
+        if not self.tcp: raise MonError('fw: only over Wi-Fi (Developer Mode)')
+        if sector & 0xfff or not 0 < len(data) <= 4096: raise MonError('fw: one 4 KB-aligned sector at a time')
+        self._send('fw 0x%x %d 0x%x' % (sector, len(data), zlib.crc32(data) & 0xffffffff))
+        l = self._line()
+        if l != 'GO': raise MonError('fw: %s' % l)
+        self.s.write(data)
+        l = self._line(30)
+        if not l.startswith('OK'): raise MonError('fw 0x%x: %s' % (sector, l))
+
     def write(self, addr, data):
         if self.tcp:                                   # TCP: the data follows "GO" in one stream
             for off in range(0, len(data), CHUNK):

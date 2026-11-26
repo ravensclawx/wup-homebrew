@@ -3,41 +3,34 @@
 
     python3 tools/wupbuild.py APPDIR                          an app folder with an app.cfg (e.g. examples/hello)
     python3 tools/wupbuild.py SRC... --name "Title" [--author A] [--version V] [--icon icon.png]
-                              [--description D] [-I dir] [-D X=Y] [-o out.wup] [--thumb] [--net] [--large]
+                              [--description D] [-I dir] [-D X=Y] [-o out.wup] [--thumb] [--net]
 
-app.cfg: key = value lines: name, author, version, description, icon (64x64 PNG; optional), sources (space separated, relative to the
-folder, globs allowed, '!pattern' leaves files out, indented lines continue), include (folders), defines, cflags (extra compiler flags), prebuild (a
-Python script in the folder run first, for generated sources; .s/.S sources are assembled), screen8 (yes: a large
-app that never uses the RGB565 screen; its .bss may fill WUP_BIGMEM), text_in_big (code that does not fit: sources,
-or 'lvgl' / 'bearssl', whose code and constants go in WUP_BIGMEM, loaded from the .wup by libwup before main()), text_in_app (sources whose code goes in the app
-area, when WUP_SPARE is full), thumb (yes/no), thumb_sources (these
-as Thumb -Os: smaller), deps (tools/deps.py names), net (yes: sockets; raw: lwIP's callback API, see include/wup.h), lvgl (yes: the GUI
-library, include/wup_lvgl.h), kit (yes: the Homebrew Menu's look for apps, include/wup_kit.h; brings lvgl), system (yes: the menu: it may format the filesystem), https (yes: wup_https.h, BearSSL; with net = yes), large (yes/no/auto:
-code in WUP_SPARE (368 KB), constants and stack at 0x350000, .bss in WUP_BIGMEM below the screen (heap after
-it: wup_bigmem_free); auto = only when it does not fit).
+app.cfg: key = value lines: name, author, version, description, icon (64x64 PNG; optional), sources (space separated,
+relative to the folder, globs allowed, '!pattern' leaves files out, indented lines continue), include (folders),
+defines, cflags (extra compiler flags), prebuild (a Python script in the folder run first, for generated sources;
+.s/.S sources are assembled), thumb (yes/no), thumb_sources (these as Thumb -Os: smaller), deps (tools/deps.py names),
+net (yes: sockets; raw: lwIP's callback API, see include/wup.h), lvgl (yes: the GUI library, include/wup_lvgl.h), kit
+(yes: the Homebrew Menu's look for apps, include/wup_kit.h; brings lvgl), system (yes: the menu and Software Update:
+the filesystem may be formatted, the flash slots written), https (yes: wup_https.h, BearSSL; with net = yes).
 SRC: .c files or directories (all their .c files). The app defines WUP_APP("Title") and main().
-Code is ARM (faster than Thumb on the ARM926; --thumb for smaller), -O2, linked for 0x350000; code,
-data, .bss and libwup's 24 KB stack must fit 0x350000..0x380000. Send it with
+An app is one image linked at WUP_APP_BASE (0x80000, include/wup_ram.h): code, constants and data, then its .bss;
+the rest of the app's block, to WUP_APP_END (0x253000), is its heap. Code is ARM (faster than Thumb on the ARM926;
+--thumb for smaller), -O2. Send it to a pad with
     python3 tools/wuplink.py out.wup"""
 import os, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import paths
-BASE, LIMIT = 0x350000, 0x380000
-if paths.KERNEL:                                         # (the kernel: one flat block, libwup include/wup_ram.h)
-    BASE, LIMIT = 0x080000, 0x253000
-HEAP_MIN = 0x10000                                       # (the kernel: at least this much heap left after .bss)
+BASE, LIMIT = 0x080000, 0x253000                         # the app's block (include/wup_ram.h)
+HEAP_MIN = 0x10000                                       # at least this much heap left after .bss
 NM = paths.NM
-LIB = ([os.path.join(paths.SRC, f) for f in ('wup.c', 'sys.c', 'kernel.c', 'pthread.c', 'time.c', 'atomic.c', 'gfx.c', 'fonts.c', 'mmu.c', 'wup_hw.c', 'fs.c', 'mem.S')]
+LIB = ([os.path.join(paths.SRC, f) for f in ('wup.c', 'sys.c', 'kernel.c', 'pthread.c', 'time.c', 'atomic.c', 'gfx.c', 'fonts.c', 'wup_hw.c', 'fs.c', 'mem.S')]
        + [os.path.join(paths.THIRD, 'littlefs', f) for f in ('lfs.c', 'lfs_util.c')])
-
-
-SPARE, SPARE_END = 0x0da000, 0x136000
-BIG, BIG_SCREEN, BIG_END = 0x190000, 0x221400, 0x2fa400   # WUP_BIGMEM, the RGB565 screen in it, its end
 OBJCOPY = paths.OBJCOPY
+IGNORED = ('large', 'screen8', 'text_in_big', 'text_in_app')   # (v1's memory layouts: one layout now)
 
 
-def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, large=None, thumb_srcs=(), cflags=(), screen8=False, app_text=(), gui=False, system=False, big_text=(), https=False):
-    """large: True / False / None = only if it does not fit the app area"""
+def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, thumb_srcs=(), cflags=(), gui=False, system=False, https=False):
+    """-> the app image"""
     subprocess.run([sys.executable, os.path.join(HERE, 'mkfont_aa.py')], check=True, stdout=subprocess.DEVNULL)
     import sdk; sdk.ensure()
     mode = 'thumb' if thumb else 'arm'
@@ -45,11 +38,10 @@ def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, large=None,
     flags = sum((['-I', i] for i in incs), []) + ['-I', paths.INCLUDE,
              *sdk.flags(mode), '-O2', '-isystem', res + '/include', '-isystem', paths.CONFIG, '-fno-common', '-ffunction-sections', '-fdata-sections',
              '-Wall', '-Wno-unused-function', '-ffile-prefix-map=%s=.' % paths.ROOT, '-I', paths.SRC, '-I', paths.THIRD, '-I', paths.GEN,
-             '-DFS_BOUNCE=%s' % ('0x26e800u' if paths.KERNEL else '0x34e000u'), *([] if system else ['-DFS_NO_FORMAT']), '-DLFS_NO_DEBUG',   # (only the menu may format)
+             *([] if system else ['-DFS_NO_FORMAT']), '-DLFS_NO_DEBUG',   # (only the menu may format)
              '-DLFS_NO_WARN', '-DLFS_NO_ERROR', '-DLFS_NO_ASSERT', '-DLFS_NO_INTRINSICS',
              '-D_POSIX_MONOTONIC_CLOCK=200112L']     # (libwup has it: <time.h> then names CLOCK_MONOTONIC)
     flags += ['-D' + d for d in list(defs) + os.environ.get('WUP_DEFINES', '').split()] + list(cflags)   # WUP_DEFINES: extra, for test builds
-    if paths.KERNEL: flags += ['-DWUP_KERNEL']           # (WUP_KERNEL=1: libwup on the wup-homebrew kernel, include/wupk.h)
     import deps; deps.fetch('littlefs')
     lib = list(LIB)
     if net:                                  # libwup networking: lwIP + the Wi-Fi interface + sockets
@@ -82,103 +74,36 @@ def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, large=None,
         if r.returncode: sys.exit('compile %s failed:\n%s' % (s, r.stderr[-4000:]))
         if r.stderr.strip() and not is_lib and not third: print(r.stderr.strip()[-2000:])
         objs.append(o)
-    in_app = [o for s, o in zip(lib + srcs, objs) if s in app_text]
-    in_big = ['*%s' % os.path.basename(o) for s, o in zip(lib + srcs, objs) if s in big_text]
-    if 'lvgl' in big_text and gui: in_big.append('*liblvgl.a:*')
-    if 'bearssl' in big_text and https: in_big.append('*libbearssl.a:*')
-    if paths.KERNEL:                                 # (the kernel: always the one flat image; large, screen8,
-        large, in_big, in_app = False, [], []        #  text_in_big and text_in_app mean nothing there)
-    import deps; deps.fetch('tinf'); tinf = os.path.join(deps.DEPS['tinf'][0], 'src')   # tinf: wup_inflate, and big.c's
-    for s in [os.path.join(paths.SRC, 'inflate.c'), os.path.join(tinf, 'tinflate.c')] + ([os.path.join(paths.SRC, 'big.c')] if in_big else []):
+    import deps; deps.fetch('tinf'); tinf = os.path.join(deps.DEPS['tinf'][0], 'src')   # tinf: wup_inflate
+    for s in [os.path.join(paths.SRC, 'inflate.c'), os.path.join(tinf, 'tinflate.c')]:
         o = os.path.join(bdir, os.path.relpath(s, paths.ROOT).replace(os.sep, '_') + '.o')
         subprocess.run(['clang'] + flags + ['-I', tinf, '-Wno-everything', '-c', s, '-o', o], check=True); objs.append(o)
-    if in_big and large is None: large = True        # (code in WUP_BIGMEM: the large layout has it)
-    tries = [(False, 0)] if large is False else [] if large else [(False, 0)]
-    if large is not False: tries += [(True, 0), (True, 1)]       # constants in the app area, else with the code
-    for i, (big, net_spare) in enumerate(tries):
-        r = link(objs + extra_libs + sdk.libs(mode), bdir, big, name, final=i == len(tries) - 1, net_spare=net_spare, screen8=screen8, in_app=in_app, in_big=in_big)
-        if r: return r
-    sys.exit('too big')
+    return link(objs + extra_libs + sdk.libs(mode), bdir, name)
 
 
-def link(objs, bdir, large, name, final=True, net_spare=0, screen8=False, in_app=(), in_big=()):
-    """one image: the HBRW header + code at 0x350000; large: + a second segment at WUP_SPARE. screen8: the app never
-    uses the RGB565 screen (wup_screen), so .bss may fill WUP_BIGMEM; in_app: objects whose code goes in the app area"""
+def link(objs, bdir, name):
+    """the one image: the HBRW header first, linked at BASE; its .bss after it, the heap after that"""
     ld = os.path.join(bdir, 'app.ld')
-    discard = ' /DISCARD/ : { *(.ARM.exidx*) *(.ARM.attributes) *(.comment) }'
-    if not large:
-        script = ('SECTIONS { . = 0x%x; .header : { KEEP(*(.header)) } .text : { *(.text.entry) *(.text*) } .rodata : { *(.rodata*) }'
-                  ' .data : { *(.data*) } . = ALIGN(4); __bss_start = .; .bss : { *(.bss*) *(COMMON) } . = ALIGN(4);'
-                  ' __bss_end = .; __bss2_start = .; __bss2_end = .;%s }\n' % (BASE, discard))
-    else:
-        # large: code in WUP_SPARE; header, data, constants (or, variant 1, only header and data) and the
-        # stack at 0x350000; all other .bss in WUP_BIGMEM below the screen, where the heap then starts
-        ro_app = '' if net_spare else ' *(.rodata*)'
-        ro_spare = ' *(.rodata*)' if net_spare else ''
-        app_text = ''.join(' *%s(.text*)' % os.path.basename(o) for o in in_app)
-        big_end = BIG_END if screen8 else BIG_SCREEN
-        script = ('MEMORY { app (rwx) : ORIGIN = 0x%x, LENGTH = 0x%x  spare (rwx) : ORIGIN = 0x%x, LENGTH = 0x%x'
-                  '  big (rwx) : ORIGIN = 0x%x, LENGTH = 0x%x }\n'
-                  'SECTIONS { .header : { KEEP(*(.header)) } > app'
-                  '  .bigtext : { . = ALIGN(32); __big_start = .;%s . = ALIGN(32); __big_end = .; } > big'
-                  '  .entry : { *(.text.entry)%s } > app'
-                  '  .data : { *(.data*)%s . = ALIGN(4); __seg1_end = .; } > app'
-                  '  .stack (NOLOAD) : { __bss_start = .; *(.bss.stack) . = ALIGN(4); __bss_end = .; } > app'
-                  '  .text : { *(.text*)%s . = ALIGN(4); __seg2_end = .; } > spare'
-                  '  .bss (NOLOAD) : { . = ALIGN(32); __bss2_start = .; *(.bss*) *(COMMON) . = ALIGN(32); __bss2_end = .; } > big%s }\n'
-                  % (BASE, LIMIT - BASE, SPARE, SPARE_END - SPARE, BIG, big_end - BIG, ''.join(' %s(.text* .rodata*)' % x for x in in_big), app_text, ro_app, ro_spare, discard))
-    open(ld, 'w').write(script)
-    elf = os.path.join(bdir, 'app.elf')
-    r = subprocess.run([paths.LD, '--gc-sections', '--error-limit=0', '-e', '_wup_entry', '-u', '_wup_header', '-T', ld, '-o', elf] + objs,
-                       capture_output=True, text=True)
-    if r.returncode:
-        if not final and ('will not fit' in r.stderr or 'overflow' in r.stderr): return None
-        sys.exit('link failed:\n' + r.stderr[-4000:])
+    open(ld, 'w').write('SECTIONS { . = 0x%x; .header : { KEEP(*(.header)) } .text : { *(.text.entry) *(.text*) } .rodata : { *(.rodata*) }'
+                        ' .data : { *(.data*) } . = ALIGN(4); __bss_start = .; .bss : { *(.bss*) *(COMMON) } . = ALIGN(4); __bss_end = .;'
+                        ' /DISCARD/ : { *(.ARM.exidx*) *(.ARM.attributes) *(.comment) } }\n' % BASE)
+    elf, binf = os.path.join(bdir, 'app.elf'), os.path.join(bdir, 'app.bin')
+    for out, fmt in ((elf, []), (binf, ['--oformat', 'binary'])):
+        r = subprocess.run([paths.LD, '--gc-sections', '--error-limit=0', '-e', '_wup_entry', '-u', '_wup_header', '-T', ld] + fmt + ['-o', out] + objs,
+                           capture_output=True, text=True)
+        if r.returncode: sys.exit('link failed:\n' + r.stderr[-4000:])
     syms = {}
     for l in subprocess.run([NM, elf], capture_output=True, text=True).stdout.splitlines():
         p = l.split()
         if len(p) == 3: syms[p[2]] = int(p[0], 16)
-    if not large:
-        binf = os.path.join(bdir, 'app.bin')
-        r = subprocess.run([paths.LD, '--gc-sections', '-e', '_wup_entry', '-u', '_wup_header', '-T', ld, '--oformat', 'binary', '-o', binf] + objs,
-                           capture_output=True, text=True)
-        img = bytearray(open(binf, 'rb').read())[:syms['__bss_start'] - BASE]
-        end = syms['__bss_end']
-        if paths.KERNEL and end > LIMIT - HEAP_MIN:
-            sys.exit('%s: too big: .bss reaches 0x%x, the app block ends at 0x%x' % (name, end, LIMIT))
-        if end > LIMIT:
-            if not final: return None
-            sys.exit('%s: too big: .bss reaches 0x%x, the app area ends at 0x%x' % (name, end, LIMIT))
-        seg2 = b''; big = b''
-    else:
-        b1, b2 = os.path.join(bdir, 'seg1.bin'), os.path.join(bdir, 'seg2.bin')
-        subprocess.run([OBJCOPY, '-O', 'binary', '-j', '.header', '-j', '.entry', '-j', '.data', elf, b1], check=True)   # (.entry: + text_in_app)
-        subprocess.run([OBJCOPY, '-O', 'binary', '-j', '.text', elf, b2], check=True)
-        img = bytearray(open(b1, 'rb').read())[:syms['__seg1_end'] - BASE]
-        seg2 = open(b2, 'rb').read()[:syms['__seg2_end'] - SPARE]
-        big = b''
-        if syms.get('__big_end', 0) > syms.get('__big_start', 0):
-            b3 = os.path.join(bdir, 'big.bin')
-            subprocess.run([OBJCOPY, '-O', 'binary', '-j', '.bigtext', elf, b3], check=True)
-            big = open(b3, 'rb').read()[:syms['__big_end'] - BIG]
-        end = syms['__bss_end']
+    img = bytearray(open(binf, 'rb').read())[:syms['__bss_start'] - BASE]
+    end = syms['__bss_end']
+    if end > LIMIT - HEAP_MIN:
+        sys.exit('%s: too big: .bss reaches 0x%x; the app block ends at 0x%x' % (name, end, LIMIT))
     if img[:4] != b'HBRW': sys.exit('no WUP_APP(...) header in the sources')
     struct.pack_into('<I', img, 8, len(img))
-    if large:
-        struct.pack_into('<III', img, 44, 0x32474553, SPARE, len(seg2))     # "SEG2"
-        e2 = syms['__bss2_end']
-        if big: print('%s: %d KB of code loaded into WUP_BIGMEM at 0x%x before main()' % (name, len(big) >> 10, BIG))
-        lim = BIG_END if screen8 else BIG_SCREEN
-        print('%s (large app): 0x350000 %d KB (%s), stack to 0x%x, %d KB free; code %d KB at 0x%x, %d KB free; .bss %d KB at 0x%x, %d KB left %s'
-              % (name, len(img) >> 10, 'header, data' + ('' if net_spare else ', constants'), end, (LIMIT - end) >> 10, len(seg2) >> 10, SPARE,
-                 (SPARE_END - SPARE - len(seg2)) >> 10, (e2 - syms['__bss2_start']) >> 10, BIG, (lim - e2) >> 10,
-                 'in WUP_BIGMEM' if screen8 else 'below the screen'))
-    else:
-        if paths.KERNEL:
-            print('%s: image %d KB at 0x%x, .bss to 0x%x; heap %d KB' % (name, len(img) >> 10, BASE, end, (LIMIT - end) >> 10))
-        else:
-            print('%s: code+data %d KB, with .bss up to 0x%x (%d KB free of the app area)' % (name, len(img) >> 10, end, (LIMIT - end) >> 10))
-    return bytes(img) + seg2, (big if large else b'')
+    print('%s: image %d KB at 0x%x, .bss to 0x%x; heap %d KB' % (name, len(img) >> 10, BASE, end, (LIMIT - end) >> 10))
+    return bytes(img)
 
 
 def read_cfg(d):
@@ -208,23 +133,20 @@ def build_app(d):
     kit = cfg.get('kit', 'no') == 'yes'
     if kit: srcs.append(os.path.join(paths.SRC, 'kit.c'))        # the menu's look for apps (include/wup_kit.h)
     name = cfg.get('name') or os.path.basename(d)
-    lg = cfg.get('large', 'auto')
+    for k in IGNORED:
+        if k in cfg: print('%s: app.cfg %s: ignored (one memory layout now)' % (name, k))
     pats = cfg.get('thumb_sources', '').split()               # '!pattern' excludes (hot code stays ARM)
     thumb_srcs = set(sum((glob.glob(os.path.join(d, x)) for x in pats if not x.startswith('!')), []))
     thumb_srcs -= set(sum((glob.glob(os.path.join(d, x[1:])) for x in pats if x.startswith('!')), []))
-    app_text = set(sum((glob.glob(os.path.join(d, x)) for x in cfg.get('text_in_app', '').split()), []))
-    libs_big = {'lvgl', 'bearssl'} & set(cfg.get('text_in_big', '').split())       # (whole libraries)
-    big_text = set(sum((glob.glob(os.path.join(d, x)) for x in cfg.get('text_in_big', '').split() if x not in libs_big), []))
-    big_text = {os.path.normpath(x) for x in big_text} | libs_big
-    thumb_srcs = {os.path.normpath(x) for x in thumb_srcs}; app_text = {os.path.normpath(x) for x in app_text}
-    code, big = build(srcs, name, None, [os.path.join(d, x) for x in cfg.get('include', '').split()], cfg.get('defines', '').split(),
-                 cfg.get('thumb', 'no') == 'yes', {'yes': True, 'raw': 'raw'}.get(cfg.get('net', 'no'), False), None if lg == 'auto' else lg == 'yes', thumb_srcs,
-                 cfg.get('cflags', '').split(), cfg.get('screen8', 'no') == 'yes', app_text, kit or cfg.get('lvgl', 'no') == 'yes', cfg.get('system', 'no') == 'yes', big_text,
+    thumb_srcs = {os.path.normpath(x) for x in thumb_srcs}
+    code = build(srcs, name, None, [os.path.join(d, x) for x in cfg.get('include', '').split()], cfg.get('defines', '').split(),
+                 cfg.get('thumb', 'no') == 'yes', {'yes': True, 'raw': 'raw'}.get(cfg.get('net', 'no'), False), thumb_srcs,
+                 cfg.get('cflags', '').split(), kit or cfg.get('lvgl', 'no') == 'yes', cfg.get('system', 'no') == 'yes',
                  cfg.get('https', 'no') == 'yes')
     icon = os.path.join(d, cfg['icon']) if cfg.get('icon') else None
     author, version = cfg.get('author', ''), cfg.get('version', '1.0')
     description = cfg.get('description', '')
-    return (code, big), name, author, version, icon, description
+    return code, name, author, version, icon, description
 
 
 def main():
@@ -242,13 +164,11 @@ def main():
             if os.path.isdir(x): srcs += sorted(os.path.join(x, f) for f in os.listdir(x) if f.endswith('.c'))
             else: srcs.append(x)
         name = opt('--name') or os.path.splitext(os.path.basename(srcs[0].rstrip('/')))[0]
-        code = build([os.path.abspath(s) for s in srcs], name, None, multi('-I'), multi('-D'), '--thumb' in a, '--net' in a,
-                     True if '--large' in a else None)
+        code = build([os.path.abspath(s) for s in srcs], name, None, multi('-I'), multi('-D'), '--thumb' in a, '--net' in a)
         icon, author, version, out = opt('--icon'), opt('--author', ''), opt('--version', '1.0'), opt('-o')
         description = opt('--description', '')
     import wupack
-    code, big = code
-    data = wupack.pack(code, name, author, version, icon, description, big)
+    data = wupack.pack(code, name, author, version, icon, description)
     out = out or os.path.join(paths.apps_out(), name.replace(' ', '_').lower() + '.wup')
     open(out, 'wb').write(data)
     print('%s (%d KB)' % (out, len(data) >> 10))

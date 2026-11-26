@@ -2,9 +2,8 @@
 """Safe GamePad flashing over UART boot, built on wuptool (wuptool/wuptool.py + wuptool.bin).
 
     python3 tools/flash/gamepad_flash.py backup                 full 32 MiB backup (+ checks)
-    python3 tools/flash/gamepad_flash.py install-cfw            the hook into Product1, the loader and the menu (about 3 minutes)
-    python3 tools/flash/gamepad_flash.py install-cfw --system streamer.bin   also a whole system for X at power-on
-    python3 tools/flash/gamepad_flash.py restore BACKUP         Product1's two hook blocks back from BACKUP: stock again
+    python3 tools/flash/gamepad_flash.py install-cfw            wup-homebrew: the kernel, the menu, the early hook (tools/mkflash.py)
+    python3 tools/flash/gamepad_flash.py restore BACKUP         Nintendo's firmware blocks we change, back from BACKUP: stock again
     python3 tools/flash/gamepad_flash.py restore BACKUP --block 0x160000 --block 0x1b0000
     python3 tools/flash/gamepad_flash.py compare BACKUP         read back the CFW blocks and compare (no writes)
     common options: --port /dev/cu.usbserial-XXXX  (default: auto-detect, like wuptool)
@@ -248,7 +247,7 @@ def cmd_backup(a):
 
 
 def cfw_image(backup):
-    """the backup with the custom firmware built in (tools/mkflash.py: hook, loader, menu)"""
+    """the backup with wup-homebrew built in (tools/mkflash.py)"""
     sys.path.insert(0, os.path.join(ROOT, 'tools'))
     import mkflash
     return mkflash.build_image(open(backup_file(backup), 'rb').read())
@@ -309,16 +308,21 @@ def mkflash_():
 
 
 def hook_blocks(mk, img):
-    """Product1's two blocks with the hook (the bl first: without it the stub is never reached)"""
+    """Product1's blocks we change: the one with the branch to the early hook first (without it nothing of ours runs),
+    then the early hook's code, then v1's hook site"""
     lvc = 0x100000 + struct.unpack_from('<I', img, 0x100000 + 32)[0]
-    return [(lvc + mk.HOOK_SITE) & ~(BLOCK - 1), (lvc + mk.STUB_ADDR) & ~(BLOCK - 1)]
+    out = []
+    for x in (mk.EARLY_SITE, mk.EARLY_ADDR, mk.EARLY2_ADDR, mk.V1_SITE):
+        b = (lvc + x) & ~(BLOCK - 1)
+        if b not in out: out.append(b)
+    return out
 
 
 def cmd_install(a):
     """The install (tools/mkflash.py patches): read from the pad what it needs, change only those bytes (the rest of
-    each 64 KiB block written back as it was: the filesystem shares the loader's block), write and verify each block.
-    Order: the menu (its header last), the loader, the hook stub, then the bl that reaches it: until that last
-    block the pad boots exactly as before. Then the bank selector back to Product1, only if it was not."""
+    each 64 KiB block written back as it was), write and verify each block, each when its last patch comes: the menu
+    and the kernel (their headers last), the early hook, and last the branch to it: until that block the pad boots
+    exactly as before. Then the bank selector back to Product1, only if it was not."""
     mk = mkflash_()
     t = connect(a.port)
     try:
@@ -331,8 +335,6 @@ def cmd_install(a):
             if x + n > b + BLOCK: sys.exit('a read crosses a block')
             return bytes(blk(b)[x - b:x - b + n])
         pl = mk.patches(read)
-        if getattr(a, 'system', None):                     # the system slot first (X at power-on: boot/loader.c)
-            pl = [(mk.SYS_HDR, mk.system_slot(open(a.system, 'rb').read()))] + pl
         old = {}; last = {}
         for i, (x, d) in enumerate(pl):
             for o in range(0, len(d)):
@@ -353,13 +355,12 @@ def cmd_install(a):
             t.cmd_write_data(0, bytes(b0))
             if read_block(t, 0) != bytes(b0): sys.exit('0x0000000: VERIFY FAILED. Keep the pad on and write block 0 again.')
     finally: t.close()
-    print('INSTALLED. Unground the UART-boot pad and power on: hold A for the menu%s; nothing held: the stock firmware.'
-          % (', X for the system' if getattr(a, 'system', None) else ''))
+    print('INSTALLED. Unground the UART-boot pad and power on: hold A for wup-homebrew; nothing held: the stock firmware.')
 
 
 def cmd_restore(a):
-    """Product1's two hook blocks back from the backup (the bl first): the pad boots stock again. The loader and the
-    menu in the free gap stay, unused. --block ADDR restores any other block."""
+    """Product1's blocks we change back from the backup (the early hook's branch first): the pad boots stock again.
+    The kernel and the menu in the free gap stay, unused. --block ADDR restores any other block."""
     orig = load_backup(a.backup)
     blocks = [int(b, 0) & ~(BLOCK - 1) for b in a.block] if a.block else hook_blocks(mkflash_(), orig)
     print('restoring blocks: %s' % ', '.join('0x%07x' % b for b in blocks))
@@ -451,12 +452,11 @@ def main():
     ap.add_argument('--attached', dest='g_attached', action='store_true', help='the wuptool payload is already running (e.g. right after a backup): do not upload')
     sp = ap.add_subparsers(dest='cmd', required=True)
     b = sp.add_parser('backup'); b.add_argument('--out', default=os.path.join(os.environ.get('WUP_FIRMWARE') or os.path.join(os.path.dirname(ROOT), 'wup-firmware'), 'backups')); b.add_argument('--verify', action='store_true', help='(always on now: every MiB is read twice)'); b.add_argument('--resume', help='continue an interrupted backup in this folder')
-    i = sp.add_parser('install-cfw', help='the hook into Product1, the loader and the menu into the free gap (needs no backup)')
-    i.add_argument('--system', help='also a whole system image for X at power-on (e.g. Wii U GamePad Streamer\'s build/streamer.bin)')
+    i = sp.add_parser('install-cfw', help='wup-homebrew: the kernel, the menu, the early hook (needs no backup)')
     r = sp.add_parser('restore'); r.add_argument('backup'); r.add_argument('--block', action='append', help='64 KiB block address (repeatable); default: the two hook blocks')
     c = sp.add_parser('compare'); c.add_argument('backup')
     m = sp.add_parser('make-stock', help='erase old wupcfw + wupstream on the pad and make the backup stock'); m.add_argument('backup')
-    k = sp.add_parser('blank', help='erase blocks of the free gap 0x10000-0xFFFFF (the loader, the menu, settings, apps: after restore, nothing is left)'); k.add_argument('backup'); k.add_argument('--block', action='append')
+    k = sp.add_parser('blank', help='erase blocks of the free gap 0x10000-0xFFFFF (the kernel, the menu, its settings: after restore, nothing of ours is left)'); k.add_argument('backup'); k.add_argument('--block', action='append')
     e = sp.add_parser('eeprom', help='dump the UIC EEPROM (byte by byte, sanity-checked)'); e.add_argument('out'); e.add_argument('--attached', action='store_true', help='payload already running: do not upload')
     a = ap.parse_args()
     global ATTACHED; ATTACHED = a.g_attached

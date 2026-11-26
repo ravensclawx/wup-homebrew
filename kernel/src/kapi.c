@@ -53,6 +53,8 @@ static void k_log(const char *s) { klog("%s", s); }
 static int k_self(void) { return sched_current(); }
 static void k_screen_show(const void *fb) { lcd_show((u32)fb); }
 static const void *k_screen_shown(void) { return (const void *)REG(0xf0009474u); }
+/* the rumble motor: a pin, 0xF0005114 (high: on), as the stock firmware's vibrate module drives it */
+void rumble(int on) { REG(0xf0005114u) = on ? 0xc300u : 0xc200u; }
 
 static const wupk_t table = {
     WUPK_MAGIC, WUPK_VERSION,
@@ -65,6 +67,8 @@ static const wupk_t table = {
     wifi_mac,
     k_log,
     k_screen_show, lcd_wait_vblank, &vblanks, k_screen_shown,
+    audio_queue, audio_room, audio_queued, audio_stop,
+    mic_open, mic_read, mic_close, rumble,
 };
 
 void kapi_init(void) {

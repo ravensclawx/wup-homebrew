@@ -1,15 +1,10 @@
 /* wup_netif: the GamePad's Wi-Fi as an lwIP network interface for apps (libwup's networking, src/net.c).
  *
- * The Homebrew Menu joins the network and keeps the radio associated when it starts an app; it hands
- * over the address it has (the hand-off block net_*). This driver takes the radio's frames from there, the same
- * way the menu's libwup's network glue does (addresses from the stock firmware, rev 7677):
- *   receive   wup_netif_rx(ifidx, pkt) replaces 'bl 0x1a95c' at LVC 0x457ba in dhd_rx_frame. It runs in the
- *             radio driver's task, so it only copies the frame into a byte ring and frees the packet;
- *             wup_netif_poll() hands the ring to lwIP from the app's own loop.
- *   transmit  a firmware pool packet (0x72ddc) with the frame at an address = 2 mod 4 (SDPCM data
- *             offset 14), D-cache cleaned, dhd_sendpkt(dhdp, 0, pkt) at 0x453f6.
- *   unhook    wup_netif_stop() points the call at the permanent drop routine (as the menu does): frames must
- *             never reach Nintendo's idle stack, and the hook must not point into an app that is gone. */
+ * The radio is the kernel's and stays joined from app to app; the Homebrew Menu hands over the address it has (the
+ * hand-off block net_*). Received frames come from the kernel's radio task through a hook (wupk.h wifi_hooks): it
+ * only copies each into a byte ring, and wup_netif_poll() hands the ring to lwIP from the app's own loop or thread.
+ * Frames go out through the kernel (wifi_tx). When the app's networking stops, the hook is taken away again: frames
+ * must never reach an app that is gone. */
 #include <stdint.h>
 #include <string.h>
 #include "armcpu.h"
@@ -31,19 +26,9 @@
 #define UNLOCK() UNLOCK_TCPIP_CORE()
 #endif
 #include "wup_netif.h"
-#ifdef WUP_KERNEL
 #include "wupk.h"
-#endif
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32;
 
-typedef int  (*alloc_fn)(void **pkt, u32 size, u32 flags);
-typedef void (*free_fn)(void *pkt);
-typedef int  (*sendpkt_fn)(void *dhdp, int ifidx, void *pkt);
-typedef void *(*dhdp_fn)(void);
-#define PKT_ALLOC  ((alloc_fn)0x00072ddd)
-#define PKT_FREE   ((free_fn)0x00072e71)
-#define DHD_SEND   ((sendpkt_fn)0x000453f7)
-#define DHD_PUB    ((dhdp_fn)0x00045965)
 #define HWCLK (*(volatile u32 *)0xf0000408u)        /* ~997.3 kHz, measured on the pad */
 
 #ifndef WUP_NETIF_RING
@@ -51,7 +36,7 @@ typedef void *(*dhdp_fn)(void);
 #endif
 /* byte ring: records of u32 length + frame, 4-byte aligned; length 0xffffffff = continue at the start */
 static u8 ring[WUP_NETIF_RING] __attribute__((aligned(32), section(".bss.net")));
-static volatile u32 r_wr, r_rd;                      /* offsets: written by wup_netif_rx / wup_netif_poll */
+static volatile u32 r_wr, r_rd;                      /* offsets: written by k_rx / wup_netif_poll */
 static wup_netif_stats_t st;
 
 /* ---- clock and randomness for lwIP */
@@ -67,8 +52,6 @@ unsigned wup_netif_rand(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng <
 
 
 /* ---- receive: the radio driver's task -> ring */
-/* called by the firmware's (Thumb) radio driver through a Thumb 'bl', which cannot switch to ARM: this
-   function must be Thumb code even though apps are built as ARM (the menu's libwup's networking is all Thumb) */
 static void ring_put(const u8 *data, u32 len) {
     u32 need = (4 + len + 3) & ~3u, wr = r_wr, rd = r_rd;
     if (data && len && len <= 1536) {
@@ -85,16 +68,8 @@ static void ring_put(const u8 *data, u32 len) {
     } else st.rx_dropped++;
 out:;
 }
-#ifdef WUP_KERNEL
 /* the wup-homebrew kernel's radio task hands each frame here (wupk.h wifi_hooks) */
 static void k_rx(const u8 *eth, u32 len) { ring_put(eth, len); }
-#else
-__attribute__((used, target("thumb"), noinline)) void wup_netif_rx(int ifidx, u8 *pkt) {
-    (void)ifidx;
-    ring_put(*(u8 **)(pkt + 0x20), *(u16 *)(pkt + 0x1c));
-    PKT_FREE(pkt);
-}
-#endif
 
 /* ---- transmit. The radio loses frames handed to it back to back (measured: of 50 echoes sent at once
    about a third never arrive, every one does 2 ms apart), and dhd_sendpkt still reports success. So
@@ -111,29 +86,15 @@ static struct pbuf *txq[TXQ];
 static u32 txq_h, txq_n, tok_x10 = WUP_NETIF_TX_BURST * 10, tok_t, rate_x10 = WUP_NETIF_TX_RATE_X10, burst = WUP_NETIF_TX_BURST;
 void wup_netif_tx_pacing(unsigned r_x10, unsigned b) { if (r_x10) rate_x10 = r_x10; if (b) burst = b; }
 
-/* Nothing is sent before the radio has joined a network: a frame handed to it then makes the radio chip fault, and
-   the firmware stops with error 165-3423 at its next radio command (seen on the pad). */
+/* Nothing is sent before the radio has joined a network (a frame handed to it then made the radio chip fault). */
 static int link_up;
 static int radio_send(struct pbuf *p) {
-    void *pkt = 0;
     u32 len = p->tot_len;
     if (!link_up) return 0;                          /* (dropped) */
     if (len < 14 || len > 1514) return -1;
-#ifdef WUP_KERNEL
-    (void)pkt;
     static u8 f[1516] __attribute__((aligned(4)));
     pbuf_copy_partial(p, f, (u16_t)len, 0);
     if (WUPK->wifi_tx(f, len)) { st.tx_errors++; return -1; }
-    st.tx_frames++;
-    return 0;
-#endif
-    if (PKT_ALLOC(&pkt, len + 64, 0) || !pkt) { st.tx_errors++; return -1; }
-    u8 *data = (u8 *)pkt + 0x28 + 34;                   /* = 2 mod 4: SDPCM data offset 14 */
-    pbuf_copy_partial(p, data, (u16_t)len, 0);
-    *(u8 **)((u8 *)pkt + 0x20) = data;
-    *(u16 *)((u8 *)pkt + 0x1c) = (u16)len;
-    cache_clean(pkt, 0x28 + 34 + len);
-    if (DHD_SEND(DHD_PUB(), 0, pkt)) { st.tx_errors++; return -1; }
     st.tx_frames++;
     return 0;
 }
@@ -177,28 +138,8 @@ static err_t nif_init(struct netif *n) {
     return ERR_OK;
 }
 
-/* ---- the receive hook: 'bl wup_netif_rx' over 'bl 0x1a95c' at LVC 0x457ba (thumb bl pair) */
-#define RX_CALL 0x000457bau
-#define RX_DROP 0x000b95b0u                           /* the menu's permanent drop routine (pkt_free) */
-#ifdef WUP_KERNEL
-static void install_drop(void) { }
-static void hook(u32 target) { WUPK->wifi_hooks(target ? k_rx : 0, 0); }
-#define wup_netif_rx 1                                /* (hook(): non-zero = ours) */
-#else
-static void install_drop(void) {                     /* the same 10 bytes the menu writes */
-    volatile u16 *d = (volatile u16 *)RX_DROP;
-    u32 bl = thumb_bl(RX_DROP + 4, 0x72e70);
-    d[0] = 0xb500; d[1] = 0x0008; d[2] = (u16)bl; d[3] = (u16)(bl >> 16); d[4] = 0xbd00;
-    cache_clean((const void *)RX_DROP, 10);
-}
-static void hook(u32 target) {
-    u32 v = thumb_bl(RX_CALL, target);
-    volatile u16 *p = (volatile u16 *)RX_CALL;
-    p[0] = (u16)v; p[1] = (u16)(v >> 16);
-    cache_clean((const void *)RX_CALL, 4);
-    icache_inval();
-}
-#endif
+/* ---- the receive hook: the kernel's radio task hands each frame to k_rx (into the ring) */
+static void hook(int on) { WUPK->wifi_hooks(on ? k_rx : 0, 0); }
 
 static int up;
 static void pump(void);
@@ -224,15 +165,12 @@ int wup_netif_start(const u8 *mac, u32 ip, u32 mask, u32 gw, u32 dns) {
 #endif                                               /* (else the caller has started lwIP: tcpip_init) */
     ip4_addr_t a, m, g;
     ip4_addr_set_u32(&a, ip); ip4_addr_set_u32(&m, mask); ip4_addr_set_u32(&g, gw);
-#ifndef WUP_KERNEL
-    if (!((u32)wup_netif_rx & 1)) return -3;             /* must be Thumb (see wup_netif_rx) */
-#endif
     LOCK();
     if (!netif_add(&nif, &a, &m, &g, 0, nif_init, ethernet_input)) { UNLOCK(); return -1; }
     netif_set_default(&nif);
     netif_set_up(&nif);
     if (dns) { ip_addr_t d; ip_addr_set_ip4_u32(&d, dns); dns_setserver(0, &d); }
-    hook((u32)wup_netif_rx);                             /* frames to us from now on */
+    hook(1);                                             /* frames to us from now on */
     up = 1;
     link_up = ip != 0;                               /* an address handed over: the network is joined */
     if (ip) etharp_gratuitous(&nif);                         /* tell the network where we are (new stack, same address) */
@@ -281,12 +219,7 @@ void wup_netif_stop(void) {
     LOCK();
     for (u32 t0 = HWCLK; txq_n && HWCLK - t0 < 50000; ) tx_drain();      /* up to 50 ms for the last frames */
     while (txq_n) { pbuf_free(txq[txq_h]); txq_h = (txq_h + 1) % TXQ; txq_n--; }
-    install_drop();
-#ifdef WUP_KERNEL
     hook(0);
-#else
-    hook(RX_DROP);
-#endif
     link_up = 0;
     up = 0;
     UNLOCK();

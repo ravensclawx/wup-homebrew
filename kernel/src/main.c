@@ -1,7 +1,7 @@
-/* The wup-homebrew kernel: started by the loader (wup-menu boot/loader.c) with Nintendo's firmware stopped, the MMU
- * and caches off, r0 = HOOK_ARG. Nintendo's stage 2 set the clocks up; the rest of the pad is set up again here, the
- * way Wii U GamePad Streamer proved on the pad from the same start. Then tasks: input, the radio, the apps (the
- * Homebrew Menu first), and an idle one. */
+/* The wup-homebrew kernel: started by the early hook (wup-menu/boot/early.c) before any of Nintendo's firmware has
+ * run, the MMU and caches off, r0 = HOOK_ARG. Nintendo's stage 2 set the clocks up; the rest of the pad is set up
+ * here, as the stock firmware does it (fw_init.c, fw_audio.c: its writes, replayed). Then tasks: input, the radio,
+ * the apps (the Homebrew Menu first), and an idle one. */
 #include "os.h"
 
 void kapi_init(void);
@@ -13,7 +13,7 @@ static void idle(void *unused) {
 
 int main(u32 boot_arg) {
     uart_init();
-    klog("\nwup-homebrew kernel: start, chip revision %02x%s\n", soc_rev(), boot_arg == HOOK_ARG ? "" : " (not from the loader)");
+    klog("\nwup-homebrew kernel: start, chip revision %02x%s\n", soc_rev(), boot_arg == HOOK_ARG ? "" : " (not from the early hook)");
     irq_init();
     board_init();                                        /* (Nintendo's board init again: blocks reset to known states) */
     uart_init();

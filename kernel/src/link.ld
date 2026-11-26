@@ -1,5 +1,5 @@
-/* The kernel: one image at 0x10000, where the loader copies it (wup-menu boot/loader.c); below the apps' memory
-   (KERNEL_END, ram.h).
+/* The kernel: one image at 0x10000, where the early hook copies it (wup-menu/boot/early.c); below the hand-off block
+   and the apps' memory (KERNEL_END, ram.h).
    RAM is 4 MiB; ram.h has the rest of the map. */
 ENTRY(_start)
 SECTIONS {

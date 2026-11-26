@@ -44,18 +44,15 @@ def host_cc():
     raise SystemExit('no C compiler for host tools: install one (Windows: MSYS2 gcc), or set CC')
 
 
-KERNEL = os.environ.get('WUP_KERNEL') == '1'   # builds for the wup-homebrew kernel (wup-homebrew/kernel, include/wupk.h)
-
-
 def out(*parts):
-    """a directory under libwup's build/, created if needed (kernel builds: their own, build/kernel/...)"""
-    d = os.path.join(BUILD, *(('kernel',) if KERNEL and parts and parts[0] == 'apps' else ()), *parts)
+    """a directory under libwup's build/, created if needed"""
+    d = os.path.join(BUILD, *parts)
     os.makedirs(d, exist_ok=True)
     return d
 
 
 def apps_out():
     """where a finished app goes: build/apps in the folder the tool runs from (like make)"""
-    d = os.path.join(os.getcwd(), 'build', 'apps-kernel' if KERNEL else 'apps')
+    d = os.path.join(os.getcwd(), 'build', 'apps')
     os.makedirs(d, exist_ok=True)
     return d

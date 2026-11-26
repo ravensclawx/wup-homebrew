@@ -1,5 +1,5 @@
-/* The Wi-Fi radio's firmware, straight from Nintendo's firmware bank in flash: the streamer starts from the Homebrew
- * Menu's hook, so Nintendo's firmware is always there, and nothing of it is stored again or shipped.
+/* The Wi-Fi radio's firmware, straight from Nintendo's firmware bank in flash: stock stays installed beside
+ * wup-homebrew, so it is always there, and nothing of it is stored again or shipped.
  *
  * The radio (Broadcom BCM4319) runs Broadcom's firmware, which the pad downloads into it at every start: the WIFI
  * section of the running bank (after its 32-byte header), and the NVRAM text (the board's settings): its own WNVR

@@ -7,10 +7,10 @@ typedef uint16_t px_t;
 #define GFX_W 854
 #define GFX_H 480
 
-void gfx_begin(void);                 /* RGB565 layer on (framebuffer 0x221400), saves the firmware state */
-void gfx_end(void);                   /* firmware's 8bpp layer back */
-/* Fades in the LCD's gamma curve (0xF0009600: 33 points, the firmware leaves the identity 0, 8 .. 256):
-   it dims whatever is on screen, without redrawing. 256 = normal; always end at 256 (gfx_brightness). */
+void gfx_begin(void);                 /* the RGB565 screen on (wup_screen does this) */
+void gfx_end(void);                   /* given up for the 8-bit screen (wup_screen8 does this) */
+/* Fades through the LCD's gamma curve (33 points, 0..256): it dims whatever is on screen, without redrawing.
+   256 = normal. Apps need not fade themselves: libwup fades every app in and out. */
 #define GFX_FADE_MS 200
 void gfx_brightness(int level);       /* 0 (black) .. 256 (normal), immediately */
 void gfx_fade(int from, int to);      /* over GFX_FADE_MS, one step per frame */

@@ -9,11 +9,8 @@
 #include <sys/stat.h>
 #include "wup.h"
 
-/* ---- the heap: WUP_BIGMEM below the screen, after a large app's .bss. An app without the RGB565 screen (app.cfg:
-   screen8 = yes) may have .bss past where that screen would be: its heap is what is left of WUP_BIGMEM after it */
+/* ---- the heap: from the end of the app's .bss to the end of its block (wup_ram.h): everything left, in one piece */
 static uintptr_t brk_;
-#ifdef WUP_KERNEL
-/* on the kernel: from the end of the app's .bss to the end of its block (wup_ram.h): everything left, in one piece */
 extern uint8_t __bss_end[];
 void *sbrk(ptrdiff_t n) {
     uintptr_t lo = ((uintptr_t)__bss_end + 31) & ~(uintptr_t)31, hi = WUP_APP_END;
@@ -23,17 +20,6 @@ void *sbrk(ptrdiff_t n) {
     return p;
 }
 size_t wup_mem_free(void) { return WUP_APP_END - (brk_ ? brk_ : (((uintptr_t)__bss_end + 31) & ~(uintptr_t)31)); }
-#else
-extern uint8_t __bss2_end[];
-void *sbrk(ptrdiff_t n) {
-    uintptr_t lo = (uintptr_t)WUP_BIGMEM, hi = lo + WUP_BIGMEM_SCREEN, e = (uintptr_t)__bss2_end;
-    if (e > hi && e <= lo + WUP_BIGMEM_SIZE) hi = lo + WUP_BIGMEM_SIZE;
-    if (!brk_) brk_ = e > lo && e <= hi ? (e + 31) & ~(uintptr_t)31 : lo;
-    if ((n > 0 && (uintptr_t)n > hi - brk_) || (n < 0 && (uintptr_t)-n > brk_ - lo)) { errno = ENOMEM; return (void *)-1; }
-    void *p = (void *)brk_; brk_ += (uintptr_t)n;
-    return p;
-}
-#endif
 
 /* ---- stdout and stderr: the log (the UART, and UDP port 28803 with networking up), a line at a time */
 static int log_put(char c, FILE *f) {

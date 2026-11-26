@@ -1,35 +1,26 @@
-/* menu_slot: a new Homebrew Menu into the menu slot (include/wup_system.h; system apps only). The slot is wup-menu's
- * (tools/mkflash.py, boot/loader.c): header sector 0x30000, image 0x31000 up to 0x8FFFF. Each 4 KB sector is erased,
- * written and read back through the firmware's flash driver; the header goes last. */
-#include "wup_flash.h"
+/* menu_slot: a new Homebrew Menu or kernel into its flash slot (include/wup_system.h; system apps only). Each 4 KB
+ * sector is erased, written and read back; the header goes last. */
+#include "wupk.h"
 #include <string.h>
 #include "wup_system.h"
 #include "armcpu.h"
 typedef uint32_t u32; typedef uint8_t u8;
-#define BUF ((u8 *)0x0034e000u)                       /* uncached, DMA-reachable: the flash bounce buffer (handoff.h) */
-/* the slots (wup-menu tools/mkflash.py): on Nintendo's firmware the menu's at 0x30000; on the wup-homebrew kernel its
-   own menu's at 0xB2000 and the kernel's at 0x90000 (header {"GPST", size, crc32}; the early hook checks it) */
-#ifdef WUP_KERNEL
+/* the slots (wup-menu tools/mkflash.py): the menu's at 0xB2000 and the kernel's at 0x90000 (the early hook checks
+   both) */
 #define MENU_HDR_ 0x000b2000u
 #define MENU_END_ 0x00100000u
-#else
-#define MENU_HDR_ 0x00030000u
-#define MENU_END_ 0x00090000u
-#endif
 #define KERN_HDR_ 0x00090000u
 #define KERN_END_ 0x000b0000u
 
 static u8 hdr[20], sec[4096];
 static u32 at, fill, crc, size, open_, SLOT_HDR, SLOT_IMG, SLOT_END;
 
-static int sector(u32 addr, const u8 *d, u32 n) {
-    u32 done;
-    if (FL_ERASE4K(HANDLE, addr >> 12, 1)) return -1;
+static u8 back[4096];
+static int sector(u32 addr, const u8 *d, u32 n) {         /* erased, written, read back */
+    if (WUPK->flash_erase4k(addr)) return -1;
     if (!n) return 0;
-    memcpy(BUF, d, n);
-    if (FL_WRITE(HANDLE, addr, BUF, n, &done)) return -1;
-    memset(BUF, 0, n);
-    return FL_READ(HANDLE, addr, BUF, n, &done) || memcmp(BUF, d, n) ? -1 : 0;
+    if (WUPK->flash_write(addr, d, n)) return -1;
+    return WUPK->flash_read(addr, back, n) || memcmp(back, d, n) ? -1 : 0;
 }
 static int slot_begin(const uint8_t header[20], u32 magic, u32 at_hdr, u32 end) {
     u32 h[5]; memcpy(h, header, 20);
@@ -39,9 +30,7 @@ static int slot_begin(const uint8_t header[20], u32 magic, u32 at_hdr, u32 end) 
     return sector(SLOT_HDR, 0, 0);                    /* the old menu's header goes first */
 }
 int wup_menu_slot_begin(const uint8_t header[20]) { return slot_begin(header, 0x554e4d57u, MENU_HDR_, MENU_END_); }   /* "WMNU" */
-#ifdef WUP_KERNEL
 int wup_kernel_slot_begin(const uint8_t header[20]) { return slot_begin(header, 0x54535047u, KERN_HDR_, KERN_END_); } /* "GPST" */
-#endif
 int wup_menu_slot_write(const void *data, uint32_t n) {
     const u8 *d = data;
     if (!open_ || at + fill + n > size) return -1;

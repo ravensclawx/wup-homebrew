@@ -1,6 +1,6 @@
 #pragma once
 /* <pthread.h> on the pad: the usual subset (threads, mutexes, condition variables, once, keys), on libwup's threads
- * and semaphores (kernel.c), which are on the stock firmware's kernel. Enough for portable libraries.
+ * and semaphores (kernel.c), which are the wup-homebrew kernel's. Enough for portable libraries.
  * Differences from a desktop: at most WUP_THREADS threads; threads of one priority do not take turns by themselves
  * (one runs until it waits or sleeps); errno is shared by all threads; no cancellation, no signals. */
 #include <stddef.h>

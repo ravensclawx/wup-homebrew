@@ -1,60 +1,33 @@
-/* gfx: RGB565 drawing for the GamePad UI.
- * Display: the LCD UI layer (0xF0009400) switched to RGB565 (+0xB0 bits 1:0 = 3, stride in pixels),
- * framebuffer at 0x221400: the video decoder's frame buffers, written once at boot and idle while no
- * video is decoded (emulator canary; 884 KB free there). The D-cache is write-back and the LCD reads
- * RAM directly, so drawn regions are cleaned out of the cache by gfx_present. */
+/* gfx: RGB565 drawing for the GamePad's screen (854 x 480).
+ * The kernel shows one of two screens (wup_ram.h); drawing goes to the other (FB, the back buffer). gfx_present hands
+ * it to the kernel, which shows it from the next refresh on (never half drawn, never torn), and the region presented
+ * is copied into the other screen, which becomes the back buffer: what an app drew stays drawn, as on a single
+ * screen. LVGL apps keep the two alike through LVGL itself (src/lvgl.c, gfx__show). */
 #include <string.h>
 #include "gfx.h"
 typedef uint32_t u32;
-#ifdef HOST_TEST                                /* render on the Mac for previews (tools/uipreview) */
-px_t host_fb[GFX_W * GFX_H];
-static u32 host_lcd[0x100];
-#define LCD(o) host_lcd[(o) / 4]
-#define FB host_fb
-#else
 #define LCD(o) (*(volatile u32 *)(0xf0009400u + (o)))
-#ifdef WUP_KERNEL
-/* On the wup-homebrew kernel: two screens (wup_ram.h), double buffered. Drawing goes to the one not shown (FB, the
-   back buffer); gfx_present hands it to the kernel, which shows it from the next refresh on (never half drawn, never
-   torn), and the regions just presented are copied into the other one, which becomes the back buffer: what an app
-   drew stays drawn, as on a single screen. */
 #include "wup_ram.h"
 #include "wupk.h"
 static px_t *scr_back = (px_t *)WUP_FB0, *scr_front = (px_t *)WUP_FB1;
 #define FB scr_back
-#else
-#define FB ((px_t *)0x00221400u)
-#endif
-#endif
-static u32 saved[3];
+#include "armcpu.h"
+#define dclean cache_clean
+#define HWCLK (*(volatile u32 *)0xf0000408u)              /* ~997 kHz */
 
 px_t *gfx_fb(void) { return FB; }
-#ifdef WUP_KERNEL
 static px_t *tgt = (px_t *)WUP_FB0;
 static void screens_pick(void) {                          /* the back buffer is the one not on the screen now */
     px_t *shown = (px_t *)WUPK->screen_shown();
     scr_front = shown == (px_t *)WUP_FB1 ? (px_t *)WUP_FB1 : (px_t *)WUP_FB0;
     scr_back = scr_front == (px_t *)WUP_FB0 ? (px_t *)WUP_FB1 : (px_t *)WUP_FB0;
 }
-#endif
-/* wait for the vertical blanking interval (line counter past the 480 visible lines), so a switch of the
-   layer registers never lands in the middle of a frame */
-static void vblank(void) {     /* VCOUNT (+0xC8): lines 8..487 are visible of 510 (VSTART/VEND/VTIMING) */
-#ifndef HOST_TEST
-    u32 t0 = *(volatile u32 *)0xf0000408u;
-    while ((LCD(0xc8) & 0x7ff) < 488 && *(volatile u32 *)0xf0000408u - t0 < 25000) ;
-#endif
-}
-/* Draw the first frame BEFORE calling this: the switch then goes straight from the firmware's screen to
-   a finished one (switching first showed one frame of leftover decoder data as noise). */
+/* the RGB565 screen on: the layer set up for it (an app may have used the 8-bit screen before), the screen the kernel
+   shows kept, drawing into the other */
 static int active;
-#ifdef WUP_KERNEL
-/* the RGB565 screen on: the layer set up for it (an app may have switched it to the 8-bit screen), the screen the
-   kernel shows kept, drawing into the other */
 void gfx_begin(void) {
     if (active) return;
     active = 1;
-    saved[0] = LCD(0xb0); saved[1] = LCD(0x74); saved[2] = LCD(0x70);
     int was_ours = tgt == scr_back;
     screens_pick();
     if (was_ours) tgt = scr_back;
@@ -63,66 +36,22 @@ void gfx_begin(void) {
     WUPK->screen_show(scr_front);
     LCD(0x80) |= 0x10;
 }
-#else
-void gfx_begin(void) {
-    (void)saved;
-    if (active) return;                                  /* already on our layer: keep the saved firmware state */
-    active = 1;
-    saved[0] = LCD(0xb0); saved[1] = LCD(0x74); saved[2] = LCD(0x70);
-    vblank();
-    LCD(0x70) = GFX_W; LCD(0x74) = (u32)FB; LCD(0xb0) = (LCD(0xb0) & ~3u) | 3;
-    LCD(0x80) |= 0x10;                                   /* UI layer visible */
-}
-#endif
+void gfx_end(void) { active = 0; }                        /* (the 8-bit screen takes over: wup_screen8) */
+/* brightness through the LCD's gamma curve (33 points, 0..256): what fades use; the backlight stays as set */
 void gfx_brightness(int level) {
-#ifndef HOST_TEST
     if (level < 0) level = 0; if (level > 256) level = 256;
     for (int i = 0; i <= 32; i++) LCD(0x200 + 4 * i) = (u32)(i * 8 * level) >> 8;
-#else
-    (void)level;
-#endif
 }
-void gfx_fade(int from, int to) {
-#ifndef HOST_TEST
-    u32 t0 = *(volatile u32 *)0xf0000408u, dur = GFX_FADE_MS * 997u;           /* the ~997 kHz clock */
-    for (;;) {
-        u32 t = *(volatile u32 *)0xf0000408u - t0;
-        if (t >= dur) break;
-        vblank();
+void gfx_fade(int from, int to) {                         /* one step per refresh, GFX_FADE_MS in all */
+    u32 t0 = HWCLK, dur = GFX_FADE_MS * 997u;
+    for (u32 t; (t = HWCLK - t0) < dur; ) {
+        WUPK->vblank_wait();
         gfx_brightness(from + (to - from) * (int)(t >> 4) / (int)(dur >> 4));
-        for (u32 w = *(volatile u32 *)0xf0000408u; *(volatile u32 *)0xf0000408u - w < 4000; ) ;   /* out of this blank */
     }
-#endif
     gfx_brightness(to);
-}
-#ifdef HOST_TEST
-static void dclean(const void *p, u32 n) { (void)p; (void)n; }
-#else
-#include "armcpu.h"
-#define dclean cache_clean
-#endif
-/* Back to the firmware's 8-bit layer. Its framebuffer still holds whatever was last drawn there (it
-   showed as green garbage between an app and the menu), so it is cleared to colour 0 = black first. */
-void gfx_end(void) {
-    if (!active) return;
-    active = 0;
-#ifdef WUP_KERNEL
-    return;                                            /* (one layer: nothing to give back; the screen is dark by now) */
-#endif
-#ifndef HOST_TEST
-    uint8_t *fb8 = (uint8_t *)saved[1]; u32 n = saved[2] * GFX_H;
-    if ((u32)fb8 >= 0x300000u && (u32)fb8 + n <= 0x3f8000u) {        /* the firmware's buffer (0x388400) */
-        for (u32 i = 0; i < n; i += 4) *(u32 *)(fb8 + i) = 0;
-        dclean(fb8, n);
-        LCD(0x100) = 0; LCD(0x104) = 0xff000000u;                       /* palette 0: black */
-    }
-#endif
-    vblank();
-    LCD(0xb0) = saved[0]; LCD(0x74) = saved[1]; LCD(0x70) = saved[2];
 }
 
 void (*gfx_present_hook)(void);
-#ifdef WUP_KERNEL
 static void rect_copy(px_t *to, const px_t *from, int x, int y, int w, int h) {
     for (int j = 0; j < h; j++) memcpy(to + (y + j) * GFX_W + x, from + (y + j) * GFX_W + x, (size_t)w * sizeof(px_t));
 }
@@ -149,20 +78,8 @@ void gfx__show(px_t *buf, int y0, int y1) {        /* (rows y0..y1 changed) */
     scr_front = buf; scr_back = buf == (px_t *)WUP_FB0 ? (px_t *)WUP_FB1 : (px_t *)WUP_FB0;
     if (gfx_present_hook) gfx_present_hook();
 }
-#else
-void gfx_present(int x, int y, int w, int h) {
-    (void)x; (void)w;
-    if (y < 0) { h += y; y = 0; } if (y + h > GFX_H) h = GFX_H - y;
-    if (h > 0) dclean(FB + y * GFX_W, (u32)h * GFX_W * 2);     /* whole rows: cheap and simple */
-    if (gfx_present_hook) gfx_present_hook();
-}
-void gfx_present_all(void) { dclean(FB, GFX_W * GFX_H * 2); if (gfx_present_hook) gfx_present_hook(); }
-#endif
 
 /* render target: the screen, or an off-screen buffer (sprite caches, strips) */
-#ifndef WUP_KERNEL
-static px_t *tgt = FB;
-#endif
 static int tw = GFX_W, th = GFX_H;
 void gfx_target(px_t *buf, int w, int h) { tgt = buf; tw = w; th = h; }
 void gfx_target_screen(void) { tgt = FB; tw = GFX_W; th = GFX_H; }

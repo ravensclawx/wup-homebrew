@@ -8,7 +8,7 @@
  * slot (flash 0x90000: header {"GPST", size, crc32}, the image from 0x91000, linked at RAM 0x10000), checked, and
  * started with r0 = "HOOK" (the flash then in 4-byte address mode): every chip as cold as after power-on, the start its drivers are proven from. In every
  * other case (no X, no valid kernel, anything unexpected) this returns, the displaced instruction runs, and Nintendo's
- * firmware starts exactly as it would have (stock; A at power-on: the menu, through the later hook, boot/hook.S).
+ * firmware starts exactly as it would have (stock).
  *
  * The SPI controller and its DMA as the kernel's spi.c drives them (proven on the pad): with the caches off, DMA goes
  * straight to and from RAM. */

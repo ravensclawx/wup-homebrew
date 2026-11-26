@@ -1,6 +1,6 @@
-@ The streamer's entry (linked at 0x10000), two ways in, MMU and caches off either way:
-@  - the Homebrew Menu's loader (wup-homebrew, X held at power-on) copies the slot here, with Nintendo's firmware
-@    stopped and the MMU and caches off, and jumps with r0 = HOOK_ARG;
+@ The kernel's entry (linked at 0x10000), two ways in, MMU and caches off either way:
+@  - the early hook (wup-menu/boot/early.c: A or Autoboot at power-on) copies the kernel's slot here before any of
+@    Nintendo's firmware runs, and jumps with r0 = HOOK_ARG;
 @  - UART boot: the boot ROM's loader puts a 64 KB preamble (a branch here, then zeros, maybe an install request at
 @    0x100: tools/uartboot.py) and this image in RAM from 0 and resets into 0.
 @ The vectors are copied down to 0.

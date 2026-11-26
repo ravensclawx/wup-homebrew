@@ -14,7 +14,6 @@
 #define WUP_HANDOFF_STAGE  WUP_STAGE
 #define WUP_HANDOFF_STAGE_MAX WUP_STAGE_MAX
 #define WUP_HANDOFF_WORK_MAX (WUP_APP_END - WUP_APP_BASE)   /* the most an app image may inflate to */
-#define WUP_HANDOFF_FS_BOUNCE WUP_FS_BOUNCE     /* 4 KB, DMA-reachable: libwup's flash bounce buffer */
 enum {
     WUP_HO_RADIO_READY = 1,                     /* the radio is patched and up: the menu skips that step */
     WUP_HO_WIFI_JOINED = 2,                     /* it was associated when the app started */

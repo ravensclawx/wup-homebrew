@@ -2,11 +2,9 @@
 #include "wifi_hw.h"
 #ifdef HOST_TEST
 #define DLY(x) ((void)0)
-#elif defined(WUP_KERNEL)
+#else
 #include "wupk.h"
 #define DLY(ms) WUPK->sleep(ms)
-#else
-#define DLY ((void (*)(int))0x00089ae4)
 #endif
 #define ROL(x, n) ((x) << (n) | (x) >> (32 - (n)))
 static void sha1_block(u32 h[5], const u8 *p) {
@@ -52,7 +50,7 @@ void wpa_pmk(const char *pass, const u8 *ssid, u32 ssid_len, u8 out[32]) {
         for (int it = 1; it < 4096; it++) {
             sha1_finish(ist, u, 20, x); sha1_finish(ost, x, 20, u);
             for (int i = 0; i < 20; i++) t[i] ^= u[i];
-            if (!(it & 511)) DLY(1);                   /* let the firmware's tasks run */
+            if (!(it & 511)) DLY(1);                   /* (the other tasks a turn) */
         }
         for (int i = 0; i < 20 && (b - 1) * 20 + i < 32; i++) out[(b - 1) * 20 + i] = t[i];
     }

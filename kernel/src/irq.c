@@ -40,7 +40,7 @@ __attribute__((target("arm"))) void irq_off(void) { __asm__ volatile("mrs r0, cp
 
 /* timer 1 (0xF0000420: +0 control, +4 count, +8 compare) at 1 kHz: control 0x22 = running, prescaler 2 (1 MHz / 8),
    compare 124: what stage 2 and LVC (0x5355e) program it to */
-static void tick(int n) { (void)n; ticks_ms++; uart_rx_poll(); sched_tick(); }
+static void tick(int n) { (void)n; ticks_ms++; uart_rx_poll(); audio_tick(); sched_tick(); }
 void timer_init(void) {
     REG(0xf0000420u) = 0x20;
     REG(0xf0000428u) = 124;

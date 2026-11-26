@@ -3,7 +3,7 @@
  *   the click  when the selection moves, something opens or B goes back: 8 ms, under 2 KB.
  * Each note is a sine (a two-term recurrence) with a quieter octave above it, a 5 ms rise and an exponential fall.
  * The chime is made as it plays, by a thread of its own, keeping about 0.2 s queued.
- * While a computer is connected to the debug server (Developer Mode) the menu is silent: tools/menu_install.py
+ * While a computer is connected to the debug server (Developer Mode) the menu is silent: tools/install.py
  * puts its helper code in the audio ring's memory. */
 #include "menu.h"
 #include "dbgsrv.h"

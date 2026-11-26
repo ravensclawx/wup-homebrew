@@ -1,11 +1,11 @@
-/* The wup-homebrew kernel: the pad's own drivers and tasks under the Homebrew Menu and its apps, once the loader has
- * stopped Nintendo's firmware (wup-menu boot/loader.c). Its services for apps: kapi.c (libwup's wupk.h). */
+/* The wup-homebrew kernel: the pad's own drivers and tasks under the Homebrew Menu and its apps, started by the early
+ * hook before any of Nintendo's firmware runs (wup-menu/boot/early.c). Its services for apps: kapi.c (libwup's wupk.h). */
 #pragma once
 #include "types.h"
 #include "ram.h"
 
 #define IMAGE_BASE  0x10000u
-#define HOOK_ARG    0x4b4f4f48u                 /* "HOOK": in r0 from the loader */
+#define HOOK_ARG    0x4b4f4f48u                 /* "HOOK": in r0 from the early hook */
 
 /* lib.c */
 void *memset(void *d, int c, size_t n);
@@ -69,7 +69,6 @@ extern volatile u32 uart_overruns, uart_lost;
 extern u8 input_report[128];
 extern volatile u32 input_seq;
 void input_start(void);
-int sys_reboot(void);                           /* Nintendo's start again (flash 0's stage 2) */
 
 /* sched.c: tasks and semaphores */
 int task_start(void (*fn)(void *), void *arg, void *stack, u32 size, int prio, const char *name);
@@ -91,7 +90,7 @@ void sem_signal(int id);
 void bus_lock(void);                            /* the SPI bus (flash, UIC) and I2C: one task at a time (kapi.c) */
 void bus_unlock(void);
 
-/* app.c: the Homebrew Menu and its apps, one after another (as the loader ran them on Nintendo's firmware) */
+/* app.c: the Homebrew Menu and its apps, one after another */
 void apps_run(void *unused);
 void devload_start(void);                       /* devload.c */
 
@@ -135,6 +134,7 @@ void audio_volume(int slider);
 int mic_open(void);
 int mic_read(short *out, int max);              /* 48 kHz mono samples since the last read */
 void mic_close(void);
+void rumble(int on);
 
 /* the scratch region: 1 MB nobody else uses (big transfers: the shell's update) */
 /* spi.c: the SPI bus (UIC, flash) */

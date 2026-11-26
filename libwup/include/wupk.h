@@ -1,14 +1,14 @@
-/* The wup-homebrew kernel's services, for libwup (built with WUP_KERNEL) and the menu.
+/* The wup-homebrew kernel's services, for libwup and the menu.
  *
- * With the kernel (wup-homebrew/kernel), Nintendo's firmware is stopped at power-on (wup-menu boot/loader.c) and the
- * pad's own drivers run instead: the menu and every app get the whole pad. libwup reaches the kernel through this
+ * The kernel (wup-homebrew/kernel) runs the pad: it is started by the early hook before any of Nintendo's firmware
+ * runs (wup-menu/boot/early.c), and the menu and every app get the whole pad. libwup reaches the kernel through this
  * table, whose address is at WUPK_PTR; the table grows only at its end, and `version` says how far it goes. */
 #pragma once
 #include <stdint.h>
 
 #define WUPK_PTR     0x00000080u
 #define WUPK_MAGIC   0x4b505557u                 /* "WUPK" */
-#define WUPK_VERSION 2
+#define WUPK_VERSION 3
 
 typedef struct wupk {
     uint32_t magic, version;
@@ -57,6 +57,17 @@ typedef struct wupk {
     void (*vblank_wait)(void);                   /* until the next refresh (59.94 a second) */
     const volatile uint32_t *vblanks;            /* counts refreshes */
     const void *(*screen_shown)(void);           /* the buffer on the screen now */
+    /* version 3: sound, the microphone and the rumble motor (all stopped whenever an app ends). Sound: 48 kHz 16-bit
+       stereo frames into the kernel's ring (about 0.2 s ahead); the volume slider applies */
+    int (*audio_queue)(const int16_t *lr, int frames);   /* frames taken (up to audio_room) */
+    int (*audio_room)(void);
+    int (*audio_queued)(void);                   /* frames not yet played */
+    void (*audio_stop)(void);                    /* everything queued dropped */
+    int (*mic_open)(void);                       /* 16-bit mono, 48 kHz; 0, or < 0 */
+    int (*mic_read)(int16_t *out, int max);      /* the samples since the last read (up to max); read at least every
+                                                    20 ms or the ring overruns */
+    void (*mic_close)(void);
+    void (*rumble)(int on);
 } wupk_t;
 
 #define WUPK (*(const wupk_t *const *)WUPK_PTR)

@@ -1,24 +1,18 @@
-/* libwup: the runtime for GamePad apps (.wup) started from the Homebrew Menu.
+/* libwup: the runtime for GamePad apps (.wup) on wup-homebrew, started from the Homebrew Menu.
  *
  * Write   WUP_APP("My app");   and   int main(void) { ... return 0; }
  * Build   python3 tools/wupbuild.py <dir or .c files> --name "My app" [--icon icon.png]   -> a .wup
  *
- * The menu is not in memory while an app runs (include/handoff.h): the loader runs the app and loads the
- * menu again when main() returns. Memory an app owns, all cached (fast) while it runs:
- *   0x350000..0x380000  WUP_APP_SIZE   code, data, .bss and a 24 KB stack
- *                       (large apps, app.cfg large = yes: code and constants go to WUP_SPARE instead,
- *                       and 0x350000.. keeps data, .bss and the stack; WUP_SPARE is then taken)
- *   WUP_BIGMEM          0x190000..0x2FA400 (1.4 MB) in one piece. wup_screen() uses its top 820 KB
- *                       (0x221400..) as the RGB565 framebuffer; below it (580 KB, less a large app's .bss) is
- *                       the heap: malloc(). The C library is picolibc: <stdio.h>, <stdlib.h>, <string.h>, <math.h>...
- *                       printf goes to the log; fopen and friends work on the pad's filesystem (sys.c)
- *   WUP_SPARE           0x0DA000..0x136000 (368 KB)
- * Display: either the full-screen RGB565 layer (wup_screen, include/gfx.h drawing, fonts) or the
- * firmware's own 8-bit paletted framebuffer (wup_screen8: 854x480 bytes, 256 colours, no extra memory).
- * The stock firmware keeps running underneath (input, flash driver): call wup_sleep() in every loop,
- * or input stops updating.
+ * The pad runs the wup-homebrew kernel (wup-homebrew/kernel): nothing of Nintendo's runs while an app does. Only the
+ * kernel stays in memory between apps (include/handoff.h); the menu is loaded again when main() returns.
+ * Memory: the app owns one flat block, WUP_APP_BASE..WUP_APP_END (about 1.8 MB, include/wup_ram.h): its code and data,
+ * its .bss, then the heap, malloc(), to the end. The C library is picolibc: <stdio.h>, <stdlib.h>, <string.h>,
+ * <math.h>...; printf goes to the log; fopen and friends work on the pad's filesystem (sys.c). Threads: <pthread.h>.
+ * Display: the RGB565 screen (wup_screen, include/gfx.h drawing and fonts, or LVGL: include/wup_lvgl.h), double
+ * buffered by the kernel; or an 8-bit paletted screen (wup_screen8: 854x480 bytes, 256 colours).
  * Every app fades in once its first frame is shown (gfx_present, gfx_present_all or wup_present8; or after 0.3 s) and
- * fades out when main() returns: nothing to do in the app. */
+ * fades out when main() returns: nothing to do in the app. The volume slider and the Power button work in every app
+ * (the kernel). */
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
@@ -27,26 +21,14 @@
 #include "fs.h"
 #include "handoff.h"
 
-#ifdef WUP_KERNEL
-/* On the wup-homebrew kernel (include/wup_ram.h): the app is one flat block, WUP_APP_BASE..WUP_APP_END (about 1.8 MB):
-   its image, its .bss, then the heap (malloc) to the end. The screens are the kernel's, outside it. */
 #include "wup_ram.h"
 #define WUP_APP_SIZE      (WUP_APP_END - WUP_APP_BASE)
-#else
-#define WUP_APP_BASE      0x00350000u
-#define WUP_APP_SIZE      0x00030000u
-#define WUP_BIGMEM        ((uint8_t *)0x00190000u)
-#define WUP_BIGMEM_SIZE   (0x002fa400u - 0x00190000u)
-#define WUP_BIGMEM_SCREEN (0x00221400u - 0x00190000u)     /* what is left below the RGB565 framebuffer */
-#define WUP_SPARE         ((uint8_t *)0x000da000u)
-#define WUP_SPARE_SIZE    (0x00136000u - 0x000da000u)
-#endif
 
 #define WUP_APP(title) \
     int _wup_entry(void); \
     __attribute__((section(".header"), used)) const struct { uint32_t magic, entry, size; char name[32]; \
-                                                             uint32_t seg2_magic, seg2_addr, seg2_size; } \
-    _wup_header = { 0x57524248u, (uint32_t)_wup_entry, 0, title, 0, 0, 0 }   /* seg2: wupbuild.py (large apps) */
+                                                             uint32_t reserved[3]; } \
+    _wup_header = { 0x57524248u, (uint32_t)_wup_entry, 0, title, { 0, 0, 0 } }   /* (size: wupbuild.py) */
 int main(void);
 
 /* start another app when this one ends: check the .wup now (0 = fine), then return from main(). arg: a file for it
@@ -63,7 +45,7 @@ int wup_fs_ok(void);                                 /* the filesystem mounted (
 
 /* RGB565 full screen (854x480): draw with gfx_* (include/gfx.h), then gfx_present()/gfx_present_all() */
 px_t *wup_screen(void);
-/* the firmware's 8bpp framebuffer: 854x480, stride wup_stride8(); colours from wup_palette() */
+/* the 8-bit paletted screen: 854x480, stride wup_stride8(); colours from wup_palette() */
 uint8_t *wup_screen8(void);
 uint32_t wup_stride8(void);
 void wup_palette(int index, uint32_t rgb);           /* 0xRRGGBB */
@@ -110,7 +92,7 @@ int wup_time_known(void);
 void wup_time_set(int64_t unix_seconds, uint32_t us);   /* (the menu) */
 void wup_time_zone(const char *posix_tz);               /* (the menu) e.g. "PST8PDT,M3.2.0,M11.1.0" */
 uint32_t wup_us(void);                               /* free-running ~1 MHz clock (wraps) */
-void wup_sleep(int ms);                              /* lets the firmware run; 1 ms granularity, 2 ms ticks */
+void wup_sleep(int ms);                              /* gives the other tasks a turn (and runs net = raw networking) */
 void wup_log(const char *s);                         /* debug output: the UART, and with networking up also
                                                         UDP broadcast port 28803 (tools/wuplog.py shows it) */
 void wup_log_hex(uint32_t v);
@@ -119,7 +101,7 @@ void wup_log_hex(uint32_t v);
 int wup_battery(int *charging);                      /* percent (0..100), or -1 unknown; charging: 1 while charging */
 int wup_wifi_rssi(void);                             /* the connection's signal in dBm (< 0), or 0 when not connected */
 
-/* Threads, and what they wait on: the firmware's own kernel (µITRON) underneath (kernel.c). <pthread.h> is built on
+/* Threads, and what they wait on: the wup-homebrew kernel's (kernel.c). <pthread.h> is built on
    these. Threads of one priority do not take turns by themselves: one runs until it waits (a semaphore, a sleep,
    a blocking socket call). Everything is given back when main() returns: end your threads before that.
    priority: 0 = as the caller, +1 more urgent (it runs whenever it can), -1 less. */

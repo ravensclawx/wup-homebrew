@@ -44,9 +44,7 @@ static void check(void) {
 typedef struct { int mine, kernel, first, written; uint32_t got; } slot_t;
 static int s_begin(void *arg, const char *path, uint32_t size) {
     slot_t *x = arg; x->kernel = 0; x->mine = !strcmp(path, "homebrew_menu.bin");
-#ifdef WUP_KERNEL
     if (!strcmp(path, "kernel.bin")) x->mine = x->kernel = 1;
-#endif
     x->first = 1; x->got = 0;
     return x->mine && size < 4096 + 64 ? CATALOG_EDAMAGED : 0;
 }
@@ -55,9 +53,7 @@ static int s_data(void *arg, const uint8_t *d, uint32_t n) {
     if (!x->mine) return 0;
     if (x->first) {                                  /* (pieces are 4 KB: the first is the header sector) */
         x->first = 0;
-#ifdef WUP_KERNEL
         if (x->kernel) return n != 4096 || wup_kernel_slot_begin(d) ? CATALOG_EDAMAGED : 0;
-#endif
         if (n != 4096 || wup_menu_slot_begin(d)) return CATALOG_EDAMAGED;
         return 0;
     }

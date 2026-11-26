@@ -1,6 +1,6 @@
 /* The Homebrew Menu: installed apps (/apps/<name>/<name>.wup), Settings (Wi-Fi, file sharing, brightness, boot),
- * the Netloader (wuplink) and Developer Mode. An ordinary libwup app with LVGL; the loader starts it from the
- * menu slot (boot/loader.c) and again whenever an app ends. Starting an app is wup_exec() and returning. */
+ * the Netloader (wuplink) and Developer Mode. An ordinary libwup app with LVGL; the kernel starts it from its flash
+ * slot (kernel/src/app.c) and again whenever an app ends. Starting an app is wup_exec() and returning. */
 #include <stdio.h>
 #include <string.h>
 #include "menu.h"
@@ -69,13 +69,13 @@ void menu_wait(int ms) {
 }
 int menu_radio(void) {
     if (radio_ready) return 0;
-    int p = wifi_patch_radio(), b = p >= 0 ? wifi_bringup(WIFI_COUNTRY) : -1;
-    wdbg("patch", p); wdbg("bringup", b);
-    if (p < 0 || b) return -1;
+    int b = wifi_bringup();
+    wdbg("bringup", b);
+    if (b) return -1;
     radio_ready = 1;
     return 0;
 }
-static void net_start(void) {                      /* our stack takes the radio's frames: before joining, so none reach Nintendo's idle one */
+static void net_start(void) {                      /* our stack takes the radio's frames, before joining */
     if (net_started) return;
     uint8_t mac[6] __attribute__((aligned(4)));
     wifi_mac(mac);

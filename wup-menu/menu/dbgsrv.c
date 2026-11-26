@@ -147,7 +147,7 @@ static void run(char *line) {
     else err("unknown command (ping info r8 r16 r32 w8 w16 w32 rb wb fr fw call sleep)");
 }
 
-void dbgsrv_step(void) {
+static void dbgsrv_step_(void) {
     if (!conn) return;
     if (wb_active == 2) {                                       /* a wb (or fw) finished arriving */
         wb_active = 0;
@@ -179,7 +179,7 @@ void dbgsrv_step(void) {
         }
     }
 }
-int dbgsrv_open(void) {
+static int dbgsrv_open_(void) {
     if (listener) return 0;
     struct tcp_pcb *l = tcp_new();
     if (!l || tcp_bind(l, IP4_ADDR_ANY, 28802) != ERR_OK) { if (l) tcp_close(l); return -1; }
@@ -188,9 +188,16 @@ int dbgsrv_open(void) {
     tcp_accept(listener, on_accept);
     return 0;
 }
-void dbgsrv_close(void) {
+static void dbgsrv_close_(void) {
     if (conn) { tcp_abort(conn); conn = 0; }
     if (listener) { tcp_close(listener); listener = 0; }
 }
 int dbgsrv_active(void) { return conn != 0; }
 u32 dbgsrv_commands(void) { return ncmds; }
+
+/* lwIP runs in its own thread (the menu: net = yes): its callbacks above run there, holding its core lock; these run
+   on the menu's thread under the same lock, so the two never overlap */
+#include "lwip/tcpip.h"
+int dbgsrv_open(void) { LOCK_TCPIP_CORE(); int r = dbgsrv_open_(); UNLOCK_TCPIP_CORE(); return r; }
+void dbgsrv_close(void) { LOCK_TCPIP_CORE(); dbgsrv_close_(); UNLOCK_TCPIP_CORE(); }
+void dbgsrv_step(void) { LOCK_TCPIP_CORE(); dbgsrv_step_(); UNLOCK_TCPIP_CORE(); }

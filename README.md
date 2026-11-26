@@ -25,7 +25,7 @@ themselves. Don't, and it starts Nintendo's firmware exactly as it always has.
   over error-message text it never uses. Without A (or Autoboot) the hook puts back everything it touched and stock
   runs from its normal start.
 - **The whole pad.** Under wup-homebrew nothing of Nintendo's runs: apps get the CPU and about 1.8 MB of memory each,
-  where they had a few hundred KB around Nintendo's firmware. WUP Boy runs games that crawled before at full speed.
+  where they had a few hundred KB around Nintendo's firmware.
 - **Safe.** If the kernel or the menu in flash is not whole, A starts stock. Power off with the Power button, as on
   stock.
 
@@ -48,13 +48,9 @@ Menu, over Wi-Fi ([wup-menu/docs/install.md](wup-menu/docs/install.md)).
 
 ## Apps
 
-Apps have repositories of their own and come to the GamePad through the App Store
-([its catalogue](https://github.com/ravensclawx/wup-homebrew-apps)):
-
-| App | What |
-|---|---|
-| [WUP Stream](https://github.com/ravensclawx/wup-stream) | a computer's picture, sound and controls on the GamePad: libwupstream on the computer, the app on the pad |
-| [WUP Boy](https://github.com/ravensclawx/wup-boy) | Game Boy and Game Boy Color games, with save states, rewind and fast forward |
+Apps come to the GamePad through the App Store, from any repositories you add, or over File Sharing (FTP). Earlier
+apps, archived for now: [WUP Stream](https://github.com/ravensclawx/wup-stream) (a computer's picture and sound on the
+pad) and [WUP Boy](https://github.com/ravensclawx/wup-boy) (Game Boy games).
 
 Write your own with [libwup](libwup): `kit = yes` in an app's `app.cfg` gives it the menu's look.
 

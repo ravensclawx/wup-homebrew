@@ -6,5 +6,6 @@ typedef struct { int state, to_file;   /* (to_file: always) */ char name[64]; ui
 int wuplink_open(void);          /* listen (TCP 28800) + answer discovery (UDP 28801) */
 void wuplink_close(void);
 void wuplink_rearm(void);        /* after an error or a launch: wait for the next sender */
+void wuplink_step(void);         /* from the menu loop: what arrived, into the file */
 const wup_status_t *wuplink_status(void);
 int wuplink_port(void);

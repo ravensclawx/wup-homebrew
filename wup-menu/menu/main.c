@@ -63,6 +63,7 @@ void menu_poll(void) {
     clock_network(on);
     if (dbg_open) dbgsrv_step();
     if (ftp_open) ftpd_step();
+    wuplink_step();
 }
 void menu_wait(int ms) {
     for (int t = 0; t < ms && !leaving; t += 10) { wup_lvgl_run(10); menu_poll(); }

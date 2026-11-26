@@ -45,9 +45,16 @@ static void gone(const char *why) {
 }
 static void conn_err(void *arg, err_t err) { (void)arg; (void)err; conn = 0; gone("Connection lost"); }
 
+/* what arrives waits here, unacknowledged (TCP holds the sender back), until wuplink_step writes it: lwIP's callbacks
+   run in its own thread, and the filesystem is the menu thread's */
+static struct pbuf *pend; static int fin;
 static err_t conn_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
-    (void)arg; (void)err;
-    if (!p) { drop_conn(); gone("Sender disconnected"); return ERR_OK; }
+    (void)arg; (void)err; (void)pcb;
+    if (!p) { fin = 1; return ERR_OK; }
+    if (pend) pbuf_cat(pend, p); else pend = p;
+    return ERR_OK;
+}
+static void take(struct pbuf *p) {                     /* (the menu's thread, under lwIP's lock: wuplink_step) */
     for (struct pbuf *q = p; q; q = q->next) {
         const u8 *d = q->payload; u32 n = q->len;
         while (n) {
@@ -86,14 +93,21 @@ static err_t conn_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err
             } else n = 0;                                   /* ignore anything after the end */
         }
     }
-    tcp_recved(pcb, p->tot_len);
-    pbuf_free(p);
-    return ERR_OK;
+}
+static void wuplink_step_(void) {
+    if (pend) {
+        struct pbuf *p = pend; pend = 0;
+        take(p);
+        if (conn) tcp_recved(conn, p->tot_len);
+        pbuf_free(p);
+    }
+    if (fin) { fin = 0; drop_conn(); gone("Sender disconnected"); }
 }
 static err_t on_accept(void *arg, struct tcp_pcb *pcb, err_t err) {
     (void)arg; (void)err;
     if (conn || st.state != WUP_WAITING) { u32 v = 3; tcp_write(pcb, &v, 4, TCP_WRITE_FLAG_COPY); tcp_output(pcb); tcp_close(pcb); return ERR_OK; }
-    conn = pcb; hdr_got = 0; hdr_need = 20;
+    conn = pcb; hdr_got = 0; hdr_need = 20; fin = 0;
+    if (pend) { pbuf_free(pend); pend = 0; }
     st.state = WUP_HEADER; st.name[0] = 0; st.done = st.total = 0; st.to_file = 0;
     tcp_recv(pcb, conn_recv); tcp_err(pcb, conn_err);
     return ERR_OK;
@@ -108,7 +122,7 @@ static void disc_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_a
     pbuf_free(p);
 }
 
-int wuplink_open(void) {
+static int wuplink_open_(void) {
     if (listener) return 0;
     memset(&st, 0, sizeof st);
     struct tcp_pcb *l = tcp_new();
@@ -121,12 +135,21 @@ int wuplink_open(void) {
     st.state = WUP_WAITING;
     return 0;
 }
-void wuplink_close(void) {
-    drop_conn();
+static void wuplink_close_(void) {
+    drop_conn(); fin = 0;
+    if (pend) { pbuf_free(pend); pend = 0; }
     if (listener) { tcp_close(listener); listener = 0; }
     if (disc) { udp_remove(disc); disc = 0; }
     st.state = WUP_OFF;
 }
-void wuplink_rearm(void) { drop_conn(); st.state = listener ? WUP_WAITING : WUP_OFF; st.error = 0; }
+static void wuplink_rearm_(void) { drop_conn(); st.state = listener ? WUP_WAITING : WUP_OFF; st.error = 0; }
 const wup_status_t *wuplink_status(void) { return &st; }
 int wuplink_port(void) { return TCP_PORT; }
+
+/* lwIP runs in its own thread (the menu: net = yes): its callbacks above run there, holding its core lock; these run
+   on the menu's thread under the same lock, so the two never overlap */
+#include "lwip/tcpip.h"
+int wuplink_open(void) { LOCK_TCPIP_CORE(); int r = wuplink_open_(); UNLOCK_TCPIP_CORE(); return r; }
+void wuplink_close(void) { LOCK_TCPIP_CORE(); wuplink_close_(); UNLOCK_TCPIP_CORE(); }
+void wuplink_rearm(void) { LOCK_TCPIP_CORE(); wuplink_rearm_(); UNLOCK_TCPIP_CORE(); }
+void wuplink_step(void) { LOCK_TCPIP_CORE(); wuplink_step_(); UNLOCK_TCPIP_CORE(); }

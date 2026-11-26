@@ -307,16 +307,16 @@ static void sess_step(sess_t *s) {
 }
 
 int ftpd_busy(void) { for (int i = 0; i < NSESS; i++) if (ss[i].used && ss[i].op != OP_NONE) return 1; return 0; }
-int ftpd_open(void) {
+static int ftpd_open_(void) {
     if (listener) return 0;
     listener = io_listen(FTP_PORT);
     return listener ? 0 : -1;
 }
-void ftpd_close(void) {
+static void ftpd_close_(void) {
     for (int i = 0; i < NSESS; i++) if (ss[i].used) sess_end(&ss[i]);
     if (listener) { io_close(listener); listener = 0; }
 }
-void ftpd_step(void) {
+static void ftpd_step_(void) {
     if (!listener) return;
     for (ep_t *e; (e = io_accept(listener)); ) {
         int i = 0; while (i < NSESS && ss[i].used) i++;
@@ -407,4 +407,17 @@ static u32 io_local_ip(ep_t *e) { return e->pcb ? ip4_addr_get_u32(ip_2_ip4(&e->
 static u32 io_ms(void) { return sys_now(); }
 #else
 #include "ftphost.h"                              /* ---- host glue: tools/ftptest/ftphost.c */
+#endif
+
+#ifndef FTP_HOST
+/* lwIP runs in its own thread (the menu: net = yes): its callbacks above run there, holding its core lock; these run
+   on the menu's thread under the same lock, so the two never overlap */
+#include "lwip/tcpip.h"
+int ftpd_open(void) { LOCK_TCPIP_CORE(); int r = ftpd_open_(); UNLOCK_TCPIP_CORE(); return r; }
+void ftpd_close(void) { LOCK_TCPIP_CORE(); ftpd_close_(); UNLOCK_TCPIP_CORE(); }
+void ftpd_step(void) { LOCK_TCPIP_CORE(); ftpd_step_(); UNLOCK_TCPIP_CORE(); }
+#else
+int ftpd_open(void) { return ftpd_open_(); }
+void ftpd_close(void) { ftpd_close_(); }
+void ftpd_step(void) { ftpd_step_(); }
 #endif

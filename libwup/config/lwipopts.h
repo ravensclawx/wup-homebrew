@@ -1,6 +1,7 @@
-/* lwIP options: lwIP inside the GamePad's stock firmware, on raw Ethernet frames of the Broadcom radio (wup_netif.c).
- * Two ways (app.cfg): net = yes (WUP_NET_SOCKETS): lwIP's sockets, the stack in its own threads (sys_arch.c);
- * net = raw: lwIP's callback API only, polled from the app's loop (NO_SYS): the menu. */
+/* lwIP options: lwIP on raw Ethernet frames of the Broadcom radio (the kernel's driver; src/wup_netif.c).
+ * Two ways (app.cfg): net = yes (WUP_NET_SOCKETS): lwIP's sockets, the stack in its own threads (sys_arch.c), its
+ * callback API usable too under the core lock (the menu's FTP, Developer Mode and Netloader);
+ * net = raw: lwIP's callback API only, polled from the app's loop (NO_SYS): small apps without threads. */
 #pragma once
 #ifdef WUP_NET_SOCKETS
 #define NO_SYS                      0
@@ -117,7 +118,7 @@ void wup__sntp_time(unsigned sec, unsigned us);
 #define LWIP_DONT_PROVIDE_BYTEORDER_FUNCTIONS 1   /* <netinet/in.h> has htons & co. */
 #define LWIP_RAND()                 wup_netif_rand()
 unsigned wup_netif_rand(void);
-/* the heap and pools in .bss.net: a large app keeps them next to its code in WUP_SPARE (wupbuild.py) */
+/* the heap and pools in .bss.net */
 #ifdef __arm__
 #define LWIP_DECLARE_MEMORY_ALIGNED(variable_name, size) \
     u8_t variable_name[LWIP_MEM_ALIGN_BUFFER(size)] __attribute__((section(".bss.net"), aligned(4)))

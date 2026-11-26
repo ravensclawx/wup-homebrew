@@ -20,8 +20,6 @@ HOME = 'https://github.com/ravensclawx/wup-homebrew'      # (an app's own: url i
 APPS = [   # (folder, category, licence[, more files])
     (os.path.join(ROOT, 'apps', 'app_store'), 'system', 'GPL-3.0-or-later'),          # (system: Software Update's,
     (os.path.join(ROOT, 'apps', 'software_update'), 'system', 'GPL-3.0-or-later'),    #  not listed in the App Store)
-    (os.path.join(PROJECTS, 'wup-stream', 'pad'), 'tool', 'GPL-3.0-or-later'),                              # (its own repository, next to this one)
-    (os.path.join(PROJECTS, 'wup-boy'), 'emu', 'GPL-3.0-or-later', [('player', 'player.wup')]),          # (its own repository, next to this one)
 ]
 
 

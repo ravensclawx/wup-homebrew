@@ -9,8 +9,6 @@ in the pad's own firmware, the install tools, the menu, App Store and Software U
 - **Hold A at power-on** (or set Autoboot) for wup-homebrew. Without A the pad boots Nintendo's firmware exactly as
   before. The Power button turns it off.
 - The app list, Settings, Wi-Fi setup with an on-screen keyboard, battery, signal and a clock.
-- **[WUP Boy](https://github.com/ravensclawx/wup-boy)** (in the App Store): Game Boy and Game Boy Color games you copy over File Sharing, with
-  save states, rewind and fast forward. No games included.
 - **App Store** and **Software Update** in the box: apps from the project's catalogue, newer kernels and menus, over HTTPS.
 - **Wi-Fi** on normal WPA2 networks (5 GHz), also ones that hide their name (Other…). **File sharing** over FTP for the pad's flash filesystem (8 MB).
   **Netloader**: send an app from a computer and run it.

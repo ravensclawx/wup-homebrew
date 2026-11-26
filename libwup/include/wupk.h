@@ -8,7 +8,7 @@
 
 #define WUPK_PTR     0x00000080u
 #define WUPK_MAGIC   0x4b505557u                 /* "WUPK" */
-#define WUPK_VERSION 1
+#define WUPK_VERSION 2
 
 typedef struct wupk {
     uint32_t magic, version;
@@ -50,6 +50,13 @@ typedef struct wupk {
     const uint8_t *mac;                          /* the radio's MAC, once it is up */
     /* the log (the UART) */
     void (*log)(const char *s);
+    /* version 2: the screen. The kernel shows one RGB565 buffer (WUP_FB0 or WUP_FB1, wup_ram.h); the switch happens at
+       the screen's vertical blank, so a buffer is never shown half drawn */
+    void (*screen_show)(const void *fb);         /* fb shown from the next refresh on; returns once it is (the other
+                                                    buffer is then free to draw into) */
+    void (*vblank_wait)(void);                   /* until the next refresh (59.94 a second) */
+    const volatile uint32_t *vblanks;            /* counts refreshes */
+    const void *(*screen_shown)(void);           /* the buffer on the screen now */
 } wupk_t;
 
 #define WUPK (*(const wupk_t *const *)WUPK_PTR)

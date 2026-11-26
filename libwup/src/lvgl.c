@@ -27,6 +27,19 @@ static void flush_direct(lv_display_t *d, const lv_area_t *a, uint8_t *px) {
     lv_display_flush_ready(d);
 }
 #define BUF_ROWS 80                                    /* a sixth of the screen (133 KB): a whole list row and more at once */
+#ifdef WUP_KERNEL
+/* On the wup-homebrew kernel: LVGL draws straight into the screen not shown (both screens are its buffers: direct
+   mode, double buffered), only what changed, and keeps the two alike itself (LVGL 9's sync areas); at the end of a
+   frame the kernel shows it from the next refresh on. No half-drawn frame, no tearing, no copying. */
+#include "wup_ram.h"
+void gfx__show(px_t *buf, int y0, int y1);
+static void flush_double(lv_display_t *d, const lv_area_t *a, uint8_t *px) {
+    static int y0 = GFX_H, y1 = -1;                   /* the rows changed this frame */
+    if (a->y1 < y0) y0 = a->y1; if (a->y2 > y1) y1 = a->y2;
+    if (lv_display_flush_is_last(d)) { gfx__show((px_t *)px, y0, y1); y0 = GFX_H; y1 = -1; }
+    lv_display_flush_ready(d);
+}
+#endif
 static void touch_read(lv_indev_t *i, lv_indev_data_t *d) {
     static int x, y;
     (void)i;
@@ -75,9 +88,16 @@ lv_display_t *wup_lvgl_init(void) {
     lv_tick_set_cb(tick);
     fb = wup_screen();
     lv_display_t *d = lv_display_create(GFX_W, GFX_H);
+#ifdef WUP_KERNEL
+    (void)flush; (void)flush_direct; (void)fb;
+    px_t *back = gfx_fb(), *front = back == (px_t *)WUP_FB0 ? (px_t *)WUP_FB1 : (px_t *)WUP_FB0;
+    lv_display_set_flush_cb(d, flush_double);
+    lv_display_set_buffers(d, back, front, GFX_W * GFX_H * sizeof(px_t), LV_DISPLAY_RENDER_MODE_DIRECT);
+#else
     void *buf = malloc((size_t)GFX_W * BUF_ROWS * sizeof(px_t));
     if (buf) { lv_display_set_flush_cb(d, flush); lv_display_set_buffers(d, buf, 0, GFX_W * BUF_ROWS * sizeof(px_t), LV_DISPLAY_RENDER_MODE_PARTIAL); }
     else { lv_display_set_flush_cb(d, flush_direct); lv_display_set_buffers(d, fb, 0, GFX_W * GFX_H * sizeof(px_t), LV_DISPLAY_RENDER_MODE_DIRECT); }   /* (no memory: as before) */
+#endif
     touch_ = lv_indev_create(); lv_indev_set_type(touch_, LV_INDEV_TYPE_POINTER); lv_indev_set_read_cb(touch_, touch_read);
     lv_group_set_default(lv_group_create());
     keys_ = lv_indev_create(); lv_indev_set_type(keys_, LV_INDEV_TYPE_KEYPAD); lv_indev_set_read_cb(keys_, keys_read);

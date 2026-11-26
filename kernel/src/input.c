@@ -13,6 +13,8 @@ static void input_task(void *unused) {
     for (;;) {
         if (!uic_poll()) {
             memcpy(input_report, uic_report, 128); input_seq++;
+            audio_volume(input_report[14]);                  /* the volume slider, in every app, as the stock firmware
+                                                               does (the codec is written only when it moves) */
             int down = (input_report[4] & 0x02) != 0;
             if (!down) { armed = 1; held = 0; }
             else if (armed && ++held == 10) power_off();      /* (40 ms down: a press, not a glitch) */

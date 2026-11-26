@@ -51,6 +51,8 @@ static void k_reboot(void) { klog("reboot asked: ignored (the way out is holding
 static int k_flash_write(u32 a, const void *p, u32 n) { return flash_program(a, p, n); }
 static void k_log(const char *s) { klog("%s", s); }
 static int k_self(void) { return sched_current(); }
+static void k_screen_show(const void *fb) { lcd_show((u32)fb); }
+static const void *k_screen_shown(void) { return (const void *)REG(0xf0009474u); }
 
 static const wupk_t table = {
     WUPK_MAGIC, WUPK_VERSION,
@@ -62,6 +64,7 @@ static const wupk_t table = {
     k_wifi_up, k_wifi_ioctl, k_wifi_var, k_wifi_join, k_wifi_leave, k_wifi_state, k_wifi_tx, k_wifi_room, k_wifi_hooks,
     wifi_mac,
     k_log,
+    k_screen_show, lcd_wait_vblank, &vblanks, k_screen_shown,
 };
 
 void kapi_init(void) {

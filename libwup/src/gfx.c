@@ -3,6 +3,7 @@
  * framebuffer at 0x221400: the video decoder's frame buffers, written once at boot and idle while no
  * video is decoded (emulator canary; 884 KB free there). The D-cache is write-back and the LCD reads
  * RAM directly, so drawn regions are cleaned out of the cache by gfx_present. */
+#include <string.h>
 #include "gfx.h"
 typedef uint32_t u32;
 #ifdef HOST_TEST                                /* render on the Mac for previews (tools/uipreview) */
@@ -13,8 +14,14 @@ static u32 host_lcd[0x100];
 #else
 #define LCD(o) (*(volatile u32 *)(0xf0009400u + (o)))
 #ifdef WUP_KERNEL
+/* On the wup-homebrew kernel: two screens (wup_ram.h), double buffered. Drawing goes to the one not shown (FB, the
+   back buffer); gfx_present hands it to the kernel, which shows it from the next refresh on (never half drawn, never
+   torn), and the regions just presented are copied into the other one, which becomes the back buffer: what an app
+   drew stays drawn, as on a single screen. */
 #include "wup_ram.h"
-#define FB ((px_t *)WUP_FB0)                    /* the kernel's screen 0 (wup_ram.h) */
+#include "wupk.h"
+static px_t *scr_back = (px_t *)WUP_FB0, *scr_front = (px_t *)WUP_FB1;
+#define FB scr_back
 #else
 #define FB ((px_t *)0x00221400u)
 #endif
@@ -22,6 +29,14 @@ static u32 host_lcd[0x100];
 static u32 saved[3];
 
 px_t *gfx_fb(void) { return FB; }
+#ifdef WUP_KERNEL
+static px_t *tgt = (px_t *)WUP_FB0;
+static void screens_pick(void) {                          /* the back buffer is the one not on the screen now */
+    px_t *shown = (px_t *)WUPK->screen_shown();
+    scr_front = shown == (px_t *)WUP_FB1 ? (px_t *)WUP_FB1 : (px_t *)WUP_FB0;
+    scr_back = scr_front == (px_t *)WUP_FB0 ? (px_t *)WUP_FB1 : (px_t *)WUP_FB0;
+}
+#endif
 /* wait for the vertical blanking interval (line counter past the 480 visible lines), so a switch of the
    layer registers never lands in the middle of a frame */
 static void vblank(void) {     /* VCOUNT (+0xC8): lines 8..487 are visible of 510 (VSTART/VEND/VTIMING) */
@@ -33,6 +48,22 @@ static void vblank(void) {     /* VCOUNT (+0xC8): lines 8..487 are visible of 51
 /* Draw the first frame BEFORE calling this: the switch then goes straight from the firmware's screen to
    a finished one (switching first showed one frame of leftover decoder data as noise). */
 static int active;
+#ifdef WUP_KERNEL
+/* the RGB565 screen on: the layer set up for it (an app may have switched it to the 8-bit screen), the screen the
+   kernel shows kept, drawing into the other */
+void gfx_begin(void) {
+    if (active) return;
+    active = 1;
+    saved[0] = LCD(0xb0); saved[1] = LCD(0x74); saved[2] = LCD(0x70);
+    int was_ours = tgt == scr_back;
+    screens_pick();
+    if (was_ours) tgt = scr_back;
+    WUPK->vblank_wait();
+    LCD(0x70) = GFX_W; LCD(0xb0) = (LCD(0xb0) & ~3u) | 3;
+    WUPK->screen_show(scr_front);
+    LCD(0x80) |= 0x10;
+}
+#else
 void gfx_begin(void) {
     (void)saved;
     if (active) return;                                  /* already on our layer: keep the saved firmware state */
@@ -42,6 +73,7 @@ void gfx_begin(void) {
     LCD(0x70) = GFX_W; LCD(0x74) = (u32)FB; LCD(0xb0) = (LCD(0xb0) & ~3u) | 3;
     LCD(0x80) |= 0x10;                                   /* UI layer visible */
 }
+#endif
 void gfx_brightness(int level) {
 #ifndef HOST_TEST
     if (level < 0) level = 0; if (level > 256) level = 256;
@@ -74,6 +106,9 @@ static void dclean(const void *p, u32 n) { (void)p; (void)n; }
 void gfx_end(void) {
     if (!active) return;
     active = 0;
+#ifdef WUP_KERNEL
+    return;                                            /* (one layer: nothing to give back; the screen is dark by now) */
+#endif
 #ifndef HOST_TEST
     uint8_t *fb8 = (uint8_t *)saved[1]; u32 n = saved[2] * GFX_H;
     if ((u32)fb8 >= 0x300000u && (u32)fb8 + n <= 0x3f8000u) {        /* the firmware's buffer (0x388400) */
@@ -87,6 +122,34 @@ void gfx_end(void) {
 }
 
 void (*gfx_present_hook)(void);
+#ifdef WUP_KERNEL
+static void rect_copy(px_t *to, const px_t *from, int x, int y, int w, int h) {
+    for (int j = 0; j < h; j++) memcpy(to + (y + j) * GFX_W + x, from + (y + j) * GFX_W + x, (size_t)w * sizeof(px_t));
+}
+/* the back buffer shown; the region x, y, w, h (what changed since the last present) carried over into the new back
+   buffer. NULL region: the whole screen */
+static void flip(int x, int y, int w, int h) {
+    if (w > 0 && h > 0) dclean(scr_back + y * GFX_W, (u32)h * GFX_W * 2);   /* (the rows presented) */
+    WUPK->screen_show(scr_back);
+    px_t *t = scr_front; scr_front = scr_back; scr_back = t;
+    if (tgt == scr_front) tgt = scr_back;
+    if (w > 0 && h > 0) rect_copy(scr_back, scr_front, x, y, w, h);
+    if (gfx_present_hook) gfx_present_hook();
+}
+void gfx_present(int x, int y, int w, int h) {
+    if (x < 0) { w += x; x = 0; } if (x + w > GFX_W) w = GFX_W - x;
+    if (y < 0) { h += y; y = 0; } if (y + h > GFX_H) h = GFX_H - y;
+    flip(x, y, w, h);
+}
+void gfx_present_all(void) { flip(0, 0, GFX_W, GFX_H); }
+/* LVGL (src/lvgl.c) keeps both screens itself: it only needs the switch */
+void gfx__show(px_t *buf, int y0, int y1) {        /* (rows y0..y1 changed) */
+    if (y1 >= y0) dclean(buf + y0 * GFX_W, (u32)(y1 - y0 + 1) * GFX_W * 2);
+    WUPK->screen_show(buf);
+    scr_front = buf; scr_back = buf == (px_t *)WUP_FB0 ? (px_t *)WUP_FB1 : (px_t *)WUP_FB0;
+    if (gfx_present_hook) gfx_present_hook();
+}
+#else
 void gfx_present(int x, int y, int w, int h) {
     (void)x; (void)w;
     if (y < 0) { h += y; y = 0; } if (y + h > GFX_H) h = GFX_H - y;
@@ -94,9 +157,13 @@ void gfx_present(int x, int y, int w, int h) {
     if (gfx_present_hook) gfx_present_hook();
 }
 void gfx_present_all(void) { dclean(FB, GFX_W * GFX_H * 2); if (gfx_present_hook) gfx_present_hook(); }
+#endif
 
 /* render target: the screen, or an off-screen buffer (sprite caches, strips) */
-static px_t *tgt = FB; static int tw = GFX_W, th = GFX_H;
+#ifndef WUP_KERNEL
+static px_t *tgt = FB;
+#endif
+static int tw = GFX_W, th = GFX_H;
 void gfx_target(px_t *buf, int w, int h) { tgt = buf; tw = w; th = h; }
 void gfx_target_screen(void) { tgt = FB; tw = GFX_W; th = GFX_H; }
 /* narrow the target to rows y..y+h (drawing coordinates then start at row y); gfx_unclip undoes it */

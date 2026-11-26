@@ -9,9 +9,16 @@ typedef uint32_t u32; typedef uint8_t u8; typedef uint16_t u16;
 #define REG(a) (*(volatile u32 *)(a))
 #define LCD(o) REG(0xf0009400u + (o))
 #define HWCLK REG(0xf0000408u)
+#ifdef WUP_KERNEL                                    /* (the wup-homebrew kernel: include/wupk.h) */
+#include "wupk.h"
+#define FW_DLY(ms) WUPK->sleep(ms)
+#define FW_REPORT  (WUPK->report)
+#define FW_BUTTONS (WUPK->report + 2)                 /* (the report's buttons, big-endian, as Nintendo's copy) */
+#else
 #define FW_DLY ((void (*)(int))0x00089ae4)            /* RTOS task delay (ARM code) */
 #define FW_BUTTONS ((const volatile u8 *)0x000bdab0u)
 #define FW_REPORT  ((const volatile u8 *)0x00178d38u)
+#endif
 
 extern u8 __bss_start[], __bss_end[], __bss2_start[], __bss2_end[];
 static u32 stack[6144] __attribute__((aligned(8), section(".bss.stack")));   /* 24 KB, in the app area */
@@ -307,6 +314,9 @@ void wup_sleep(int ms) {
 #define SIG_SEM  ((int (*)(int))0x0008ae1f)
 #define UIC_XFER ((int (*)(u32, int, int, u8 *))0x000115f5)
 #define WL_IOCTL ((int (*)(u32, void *, u32, u32))0x0001b165)
+#ifdef WUP_KERNEL
+static int uic_query(int cmd) { u8 c = (u8)cmd, v = 0; return WUPK->uic(&c, 1, &v, 1) ? -1 : v; }
+#else
 static int uic_query(int cmd) {
     u32 st = *(volatile u32 *)0x00013434u;
     if (!st || *(volatile u8 *)st != 1) return -1;
@@ -319,8 +329,9 @@ static int uic_query(int cmd) {
     SIG_SEM(0x1b);
     return v;
 }
+#endif
 int wup_battery(int *charging) {
-    int chg = (*(const volatile u8 *)(0x00178d38u + 4) >> 6) & 1;      /* (the input report, byte 4) */
+    int chg = (FW_REPORT[4] >> 6) & 1;                                  /* (the input report, byte 4) */
     if (charging) *charging = chg;
     int lv = uic_query(0x10);
     if (lv < 0 || lv > 6 || (chg && lv == 0)) return -1;               /* (level 0 while charging: unknown) */
@@ -329,7 +340,11 @@ int wup_battery(int *charging) {
 int wup_wifi_rssi(void) {
     static int buf[8] __attribute__((aligned(32)));
     buf[0] = 0; cache_flush(buf, sizeof buf);
+#ifdef WUP_KERNEL
+    int r = WUPK->wifi_ioctl(127, buf, 4, 0);
+#else
     int r = WL_IOCTL(127, buf, 4, 0);
+#endif
     cache_flush(buf, sizeof buf);
     return r || buf[0] >= 0 ? 0 : buf[0];
 }

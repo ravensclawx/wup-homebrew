@@ -31,6 +31,9 @@
 #define UNLOCK() UNLOCK_TCPIP_CORE()
 #endif
 #include "wup_netif.h"
+#ifdef WUP_KERNEL
+#include "wupk.h"
+#endif
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32;
 
 typedef int  (*alloc_fn)(void **pkt, u32 size, u32 flags);
@@ -66,10 +69,7 @@ unsigned wup_netif_rand(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng <
 /* ---- receive: the radio driver's task -> ring */
 /* called by the firmware's (Thumb) radio driver through a Thumb 'bl', which cannot switch to ARM: this
    function must be Thumb code even though apps are built as ARM (the menu's libwup's networking is all Thumb) */
-__attribute__((used, target("thumb"), noinline)) void wup_netif_rx(int ifidx, u8 *pkt) {
-    (void)ifidx;
-    u32 len = *(u16 *)(pkt + 0x1c);
-    const u8 *data = *(u8 **)(pkt + 0x20);
+static void ring_put(const u8 *data, u32 len) {
     u32 need = (4 + len + 3) & ~3u, wr = r_wr, rd = r_rd;
     if (data && len && len <= 1536) {
         if (wr + need + 4 > WUP_NETIF_RING) {                 /* no room before the end: wrap (if the reader left room) */
@@ -83,9 +83,18 @@ __attribute__((used, target("thumb"), noinline)) void wup_netif_rx(int ifidx, u8
         __asm__ volatile("" ::: "memory");          /* the record before the index that publishes it */
         r_wr = wr + need;
     } else st.rx_dropped++;
-out:
+out:;
+}
+#ifdef WUP_KERNEL
+/* the wup-homebrew kernel's radio task hands each frame here (wupk.h wifi_hooks) */
+static void k_rx(const u8 *eth, u32 len) { ring_put(eth, len); }
+#else
+__attribute__((used, target("thumb"), noinline)) void wup_netif_rx(int ifidx, u8 *pkt) {
+    (void)ifidx;
+    ring_put(*(u8 **)(pkt + 0x20), *(u16 *)(pkt + 0x1c));
     PKT_FREE(pkt);
 }
+#endif
 
 /* ---- transmit. The radio loses frames handed to it back to back (measured: of 50 echoes sent at once
    about a third never arrive, every one does 2 ms apart), and dhd_sendpkt still reports success. So
@@ -110,6 +119,14 @@ static int radio_send(struct pbuf *p) {
     u32 len = p->tot_len;
     if (!link_up) return 0;                          /* (dropped) */
     if (len < 14 || len > 1514) return -1;
+#ifdef WUP_KERNEL
+    (void)pkt;
+    static u8 f[1516] __attribute__((aligned(4)));
+    pbuf_copy_partial(p, f, (u16_t)len, 0);
+    if (WUPK->wifi_tx(f, len)) { st.tx_errors++; return -1; }
+    st.tx_frames++;
+    return 0;
+#endif
     if (PKT_ALLOC(&pkt, len + 64, 0) || !pkt) { st.tx_errors++; return -1; }
     u8 *data = (u8 *)pkt + 0x28 + 34;                   /* = 2 mod 4: SDPCM data offset 14 */
     pbuf_copy_partial(p, data, (u16_t)len, 0);
@@ -163,6 +180,11 @@ static err_t nif_init(struct netif *n) {
 /* ---- the receive hook: 'bl wup_netif_rx' over 'bl 0x1a95c' at LVC 0x457ba (thumb bl pair) */
 #define RX_CALL 0x000457bau
 #define RX_DROP 0x000b95b0u                           /* the menu's permanent drop routine (pkt_free) */
+#ifdef WUP_KERNEL
+static void install_drop(void) { }
+static void hook(u32 target) { WUPK->wifi_hooks(target ? k_rx : 0, 0); }
+#define wup_netif_rx 1                                /* (hook(): non-zero = ours) */
+#else
 static void install_drop(void) {                     /* the same 10 bytes the menu writes */
     volatile u16 *d = (volatile u16 *)RX_DROP;
     u32 bl = thumb_bl(RX_DROP + 4, 0x72e70);
@@ -176,6 +198,7 @@ static void hook(u32 target) {
     cache_clean((const void *)RX_CALL, 4);
     icache_inval();
 }
+#endif
 
 static int up;
 static void pump(void);
@@ -201,7 +224,9 @@ int wup_netif_start(const u8 *mac, u32 ip, u32 mask, u32 gw, u32 dns) {
 #endif                                               /* (else the caller has started lwIP: tcpip_init) */
     ip4_addr_t a, m, g;
     ip4_addr_set_u32(&a, ip); ip4_addr_set_u32(&m, mask); ip4_addr_set_u32(&g, gw);
+#ifndef WUP_KERNEL
     if (!((u32)wup_netif_rx & 1)) return -3;             /* must be Thumb (see wup_netif_rx) */
+#endif
     LOCK();
     if (!netif_add(&nif, &a, &m, &g, 0, nif_init, ethernet_input)) { UNLOCK(); return -1; }
     netif_set_default(&nif);
@@ -257,7 +282,11 @@ void wup_netif_stop(void) {
     for (u32 t0 = HWCLK; txq_n && HWCLK - t0 < 50000; ) tx_drain();      /* up to 50 ms for the last frames */
     while (txq_n) { pbuf_free(txq[txq_h]); txq_h = (txq_h + 1) % TXQ; txq_n--; }
     install_drop();
+#ifdef WUP_KERNEL
+    hook(0);
+#else
     hook(RX_DROP);
+#endif
     link_up = 0;
     up = 0;
     UNLOCK();

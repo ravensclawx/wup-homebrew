@@ -5,6 +5,19 @@
  * instruction fetched from RAM (the I-cache only caches C=1 pages): ~23 MB/s copies vs 44 cached.
  * Only 64 KB "large page" ranges inside coarse tables are changed (16 identical entries each). */
 #include "mmu.h"
+#ifdef WUP_KERNEL
+/* The wup-homebrew kernel maps RAM itself (the first 2 MB cached, the rest write-through: what DMA reads always holds
+   the CPU's writes): nothing to change; "uncache" only writes the D-cache back */
+__attribute__((target("arm"), noinline)) static void dclean_all(void) {
+    __asm__ volatile("1: mrc p15, 0, apsr_nzcv, c7, c14, 3\n\tbne 1b\n\tmcr p15, 0, %0, c7, c10, 4\n\tmcr p15, 0, %0, c7, c5, 0" :: "r"(0) : "memory", "cc");
+}
+int mmu_cache(unsigned lo, unsigned hi) { (void)lo; (void)hi; return 0; }
+void mmu_uncache(void) { dclean_all(); }
+void mmu_uncache_last(void) { dclean_all(); }
+int mmu_cache_section(unsigned mb_addr, unsigned hi) { (void)mb_addr; (void)hi; return 0; }
+void mmu_uncache_all(void) { dclean_all(); }
+#else
+
 typedef unsigned u32;
 __attribute__((target("arm"), noinline)) static u32 ttb(void) { u32 v; __asm__ volatile("mrc p15, 0, %0, c2, c0, 0" : "=r"(v)); return v & 0xffffc000u; }
 __attribute__((target("arm"), noinline)) static void tlb_inval(void) {
@@ -87,3 +100,4 @@ void mmu_uncache_all(void) {
     }
     mmu_uncache();
 }
+#endif

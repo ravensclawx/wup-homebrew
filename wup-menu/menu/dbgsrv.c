@@ -6,6 +6,7 @@
  * Received bytes are only queued in the lwIP callback; commands run from dbgsrv_step() in the menu's
  * loop (outside lwIP), which may poll the network itself while it waits to send.
  * Anyone on the network can read/write/call anything: it is a development tool (Settings switch). */
+#include "wup_flash.h"
 #include <stdint.h>
 #include <string.h>
 #include "lwip/tcp.h"
@@ -14,11 +15,13 @@
 #include "armcpu.h"
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32;
 #include "wup.h"
-typedef int (*rw_fn)(u32 h, u32 addr, void *buf, u32 len, u32 *done);
-#define FL_READ  ((rw_fn)0x00009141)
-#define FL_HANDLE (*(volatile u32 *)0x000bb5f4)
 #define FLBUF ((u8 *)0x0034e000u)                /* uncached, DMA-reachable: libwup's flash bounce buffer (4 KB) */
+#ifdef WUP_KERNEL
+#include "wupk.h"
+#define DLY(ms) WUPK->sleep(ms)
+#else
 #define DLY ((void (*)(int))0x00089ae4)
+#endif
 #define MAXLEN 0x20000u
 
 static struct tcp_pcb *listener, *conn;

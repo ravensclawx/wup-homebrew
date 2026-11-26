@@ -46,6 +46,7 @@ def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, large=None,
              '-DLFS_NO_WARN', '-DLFS_NO_ERROR', '-DLFS_NO_ASSERT', '-DLFS_NO_INTRINSICS',
              '-D_POSIX_MONOTONIC_CLOCK=200112L']     # (libwup has it: <time.h> then names CLOCK_MONOTONIC)
     flags += ['-D' + d for d in list(defs) + os.environ.get('WUP_DEFINES', '').split()] + list(cflags)   # WUP_DEFINES: extra, for test builds
+    if paths.KERNEL: flags += ['-DWUP_KERNEL']           # (WUP_KERNEL=1: libwup on the wup-homebrew kernel, include/wupk.h)
     import deps; deps.fetch('littlefs')
     lib = list(LIB)
     if net:                                  # libwup networking: lwIP + the Wi-Fi interface + sockets

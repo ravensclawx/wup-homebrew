@@ -1,16 +1,11 @@
 /* menu_slot: a new Homebrew Menu into the menu slot (include/wup_system.h; system apps only). The slot is wup-menu's
  * (tools/mkflash.py, boot/loader.c): header sector 0x30000, image 0x31000 up to 0x8FFFF. Each 4 KB sector is erased,
  * written and read back through the firmware's flash driver; the header goes last. */
+#include "wup_flash.h"
 #include <string.h>
 #include "wup_system.h"
 #include "armcpu.h"
 typedef uint32_t u32; typedef uint8_t u8;
-typedef int (*rw_fn)(u32 h, u32 addr, void *buf, u32 len, u32 *done);
-typedef int (*er_fn)(u32 h, u32 first, u32 count);
-#define FL_READ  ((rw_fn)0x00009141)
-#define FL_WRITE ((rw_fn)0x00008fb3)
-#define FL_ERASE4K ((er_fn)0x000092b9)
-#define HANDLE (*(volatile u32 *)0x000bb5f4)
 #define BUF ((u8 *)0x0034e000u)                       /* uncached, DMA-reachable: the flash bounce buffer (handoff.h) */
 #define SLOT_HDR 0x00030000u
 #define SLOT_IMG 0x00031000u

@@ -108,15 +108,15 @@ static int run_staged(volatile wup_handoff_t *pb) {
     return ((int (*)(void))entry)();
 }
 
-/* ---- a whole system: X at power-on. The slot (0xB2000: header {"GPST", size, crc32}, the image from 0xB3000, linked
-   at RAM 0x10000; the free gap, clear of the menu's parts) holds a system that runs the pad on its own: Wii U GamePad
-   Streamer. Nintendo's firmware is stopped for good (until the next power-on): interrupts off, the SD host's DMA
+/* ---- a whole system: X at power-on. The slot (0x90000: header {"GPST", size, crc32}, the image from 0x91000 to
+   0xB0000, linked at RAM 0x10000; the free gap, clear of the menu's parts) holds a system that runs the pad on its own:
+   the wup-homebrew kernel (wup-homebrew/kernel), which then runs its own build of the menu. Nintendo's firmware is stopped for good (until the next power-on): interrupts off, the SD host's DMA
    stopped, the caches cleaned and off, the MMU off; then the image goes to 0x10000 and gets the CPU with r0 = "HOOK".
    It sets the pad up again itself (its board init, the radio from reset). Without X, or with no valid image, nothing
    of this happens: the stock boot, or the menu, as always. */
-#define SYS_HDR    0x000b2000u
-#define SYS_IMG    0x000b3000u
-#define SYS_END    0x000fe000u
+#define SYS_HDR    0x00090000u
+#define SYS_IMG    0x00091000u
+#define SYS_END    0x000b0000u
 #define SYS_MAGIC  0x54535047u            /* "GPST" */
 #define SYS_RAM    0x00010000u
 #define HOOK_ARG   0x4b4f4f48u            /* "HOOK" */
@@ -151,10 +151,40 @@ __attribute__((target("arm"), noinline, noreturn)) static void sys_takeover(void
     __asm__ volatile("bx r1" :: "r"(arg), "r"(to) : "memory");
     for (;;) ;
 }
+/* The radio, before the takeover. By now Nintendo's driver is loading its firmware into the radio, and a radio taken
+   over in that state answers nothing on its backplane, whatever clock is asked for (seen on the pad, 2026-11-25). So
+   it is reset first, by its own watchdog (chipcommon +0x80 = 1), written through Nintendo's driver's host-side
+   backplane write (the "membytes" iovar: what the menu uses to patch the radio, menu/wifi/wifi_hw.c chip_write). The
+   kernel then finds a chip just reset by its watchdog: the start its radio driver knows (wup-os, proven on the pad). */
+#define DHD     ((int (*)(void *, void *, void *, u32))0x00041517)
+#define DHD_PUB ((void *(*)(void))0x00045965)
+static u32 ioc[7];
+static u8 dbuf[64] __attribute__((aligned(32)));
+static int chip_write32(u32 addr, u32 val) {
+    /* "membytes\0" (9) + addr + size (17 bytes), the data after: placed so that the data lands on a word boundary
+       (the driver copies it 32 bits at a time) */
+    u8 req[17 + 4] __attribute__((aligned(4)));
+    memcpy(req, "membytes", 9); memcpy(req + 9, &addr, 4); u32 n = 4; memcpy(req + 13, &n, 4); memcpy(req + 17, &val, 4);
+    u8 *buf = dbuf + 3;
+    u32 ln = 17 + 4 + 8;
+    memset(buf, 0, ln); memcpy(buf, req, 17 + 4);
+    ioc[0] = 3; ioc[1] = (u32)buf; ioc[2] = ln; ioc[3] = 1; ioc[4] = ioc[5] = ioc[6] = 0;
+    cache_flush(dbuf, sizeof dbuf); cache_flush(ioc, sizeof ioc);
+    int r = DHD(DHD_PUB(), ioc, buf, ln);
+    cache_flush(dbuf, sizeof dbuf);
+    return r;
+}
+static void radio_reset(void) {                        /* (the driver refuses while it is busy loading: tried for 3 s) */
+    int r = -1, t = 0;
+    for (; t < 3000 && (r = chip_write32(0x18000080u, 1)); t += 100) fw_sleep(100);
+    dbg(r ? "[loader] the radio's watchdog: Nintendo's driver refused (error " : "[loader] the radio reset by its watchdog (after ");
+    dbg_hex(r ? (u32)r : (u32)t); dbg(r ? ")\n" : " ms)\n");
+    fw_sleep(50);
+}
 static void sys_work(void) {
     dbg_init();
     dbg("[loader] X held: the system in the slot\n");
-    if (sys_stage()) sys_takeover();
+    if (sys_stage()) { radio_reset(); sys_takeover(); }
     dbg("[loader] no system in the slot: the stock boot\n");
 }
 

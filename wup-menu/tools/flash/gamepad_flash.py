@@ -3,6 +3,7 @@
 
     python3 tools/flash/gamepad_flash.py backup                 full 32 MiB backup (+ checks)
     python3 tools/flash/gamepad_flash.py install-cfw            the hook into Product1, the loader and the menu (about 3 minutes)
+    python3 tools/flash/gamepad_flash.py install-cfw --system streamer.bin   also a whole system for X at power-on
     python3 tools/flash/gamepad_flash.py restore BACKUP         Product1's two hook blocks back from BACKUP: stock again
     python3 tools/flash/gamepad_flash.py restore BACKUP --block 0x160000 --block 0x1b0000
     python3 tools/flash/gamepad_flash.py compare BACKUP         read back the CFW blocks and compare (no writes)
@@ -330,6 +331,8 @@ def cmd_install(a):
             if x + n > b + BLOCK: sys.exit('a read crosses a block')
             return bytes(blk(b)[x - b:x - b + n])
         pl = mk.patches(read)
+        if getattr(a, 'system', None):                     # the system slot first (X at power-on: boot/loader.c)
+            pl = [(mk.SYS_HDR, mk.system_slot(open(a.system, 'rb').read()))] + pl
         old = {}; last = {}
         for i, (x, d) in enumerate(pl):
             for o in range(0, len(d)):
@@ -350,7 +353,8 @@ def cmd_install(a):
             t.cmd_write_data(0, bytes(b0))
             if read_block(t, 0) != bytes(b0): sys.exit('0x0000000: VERIFY FAILED. Keep the pad on and write block 0 again.')
     finally: t.close()
-    print('INSTALLED. Unground the UART-boot pad and power on: hold A for the menu; nothing held: the stock firmware.')
+    print('INSTALLED. Unground the UART-boot pad and power on: hold A for the menu%s; nothing held: the stock firmware.'
+          % (', X for the system' if getattr(a, 'system', None) else ''))
 
 
 def cmd_restore(a):
@@ -447,7 +451,8 @@ def main():
     ap.add_argument('--attached', dest='g_attached', action='store_true', help='the wuptool payload is already running (e.g. right after a backup): do not upload')
     sp = ap.add_subparsers(dest='cmd', required=True)
     b = sp.add_parser('backup'); b.add_argument('--out', default=os.path.join(os.environ.get('WUP_FIRMWARE') or os.path.join(os.path.dirname(ROOT), 'wup-firmware'), 'backups')); b.add_argument('--verify', action='store_true', help='(always on now: every MiB is read twice)'); b.add_argument('--resume', help='continue an interrupted backup in this folder')
-    sp.add_parser('install-cfw', help='the hook into Product1, the loader and the menu into the free gap (needs no backup)')
+    i = sp.add_parser('install-cfw', help='the hook into Product1, the loader and the menu into the free gap (needs no backup)')
+    i.add_argument('--system', help='also a whole system image for X at power-on (e.g. Wii U GamePad Streamer\'s build/streamer.bin)')
     r = sp.add_parser('restore'); r.add_argument('backup'); r.add_argument('--block', action='append', help='64 KiB block address (repeatable); default: the two hook blocks')
     c = sp.add_parser('compare'); c.add_argument('backup')
     m = sp.add_parser('make-stock', help='erase old wupcfw + wupstream on the pad and make the backup stock'); m.add_argument('backup')

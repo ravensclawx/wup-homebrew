@@ -6,6 +6,11 @@
  * as the firmware's own UIC 0x13 query does (LVC 0x131d2). UIC 0x10 = battery level 0..6. */
 #include "sys.h"
 typedef unsigned u32; typedef unsigned char u8;
+#ifdef WUP_KERNEL                                    /* (the wup-homebrew kernel: include/wupk.h) */
+#include "wupk.h"
+#define FW_REPORT (WUPK->report)
+int uic_query(int cmd) { u8 c = (u8)cmd, v = 0; return WUPK->uic(&c, 1, &v, 1) ? -1 : v; }
+#else
 typedef int (*sem_fn)(int id, int tmo);
 typedef int (*sig_fn)(int id);
 typedef int (*xfer_fn)(u32 ctx, int ntx, int nrx, u8 *rx);
@@ -27,6 +32,7 @@ int uic_query(int cmd) {
     SIG_SEM(0x1b);
     return v;
 }
+#endif
 void sys_power(power_t *p) {
     u8 s = FW_REPORT[4];
     p->ac = s & 1; p->charging = (s >> 6) & 1; p->headphones = (s >> 5) & 1;

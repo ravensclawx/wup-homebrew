@@ -8,6 +8,21 @@ typedef uint8_t u8; typedef uint32_t u32;
    it hands {0, PWM level 0..255, frequency} to the LCD driver (LVC 0xdc7c, Thumb; its handle at 0xbb754). The console
    only ever picks one of the six {PWM, frequency} pairs of the firmware's copy of the power chip's EEPROM table
    (0xbdc34; on this pad 21 45 77 122 183 255, frequency 1 in every pair), but the driver takes any PWM level. */
+#ifdef WUP_KERNEL
+/* (the wup-homebrew kernel: the panel's own PWM; the six levels of the power chip's table as measured on a pad) */
+#include "wupk.h"
+static const u8 levels[6] = { 21, 45, 77, 122, 183, 255 };
+void hw_backlight(int percent) { if (percent >= 0 && percent <= 100) WUPK->backlight((percent * 255 + 50) / 100); }
+int hw_backlight_percent(int level) { return level >= 1 && level <= 6 ? ((levels[level - 1] * 100 / 255 + 5) / 10) * 10 : 0; }
+int hw_backlight_default(void) {                         /* the EEPROM's own level: UIC EEPROM 0x1286 {level, CRC-16} */
+    u8 q[4] = { 0x03, 0x12, 0x86, 3 }, b[3];
+    if (WUPK->uic(q, 4, b, 3)) return -1;
+    u32 c = 0xffff ^ b[0];
+    for (int k = 0; k < 8; k++) c = c & 1 ? c >> 1 ^ 0x8408 : c >> 1;
+    return b[0] >= 1 && b[0] <= 5 && c == (u32)(b[1] | b[2] << 8) ? hw_backlight_percent(b[0]) : -1;
+}
+void hw_screen_power(int on) { u8 c[2] = { 0x12, (u8)!!on }; WUPK->uic(c, 2, 0, 0); }
+#else
 #define TABLE ((const volatile u8 *)0xbdc34)
 void hw_backlight(int percent) {
     static u8 blk[4];
@@ -29,6 +44,7 @@ int hw_backlight_default(void) {
 }
 /* the power chip's command 0x12 0 / 1, through the firmware's function (LVC 0x13142, Thumb; its handle at 0xbb2d0) */
 void hw_screen_power(int on) { ((int (*)(u32, u32))0x00013143)(*(volatile u32 *)0xbb2d0, (u32)!!on); }
+#endif
 
 /* ---- the rumble motor: pin 4 of the vibrate module's GPIO table, bit 8 of 0xF0005114 (read from the running pad) */
 void hw_rumble(int on) { if (on) REG(0xf0005114u) |= 0x100; else REG(0xf0005114u) &= ~0x100u; }

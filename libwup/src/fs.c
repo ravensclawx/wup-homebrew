@@ -20,12 +20,10 @@
 #include "littlefs/lfs.h"
 #include "fs.h"
 typedef uint32_t u32; typedef uint8_t u8;
-typedef int (*rw_fn)(u32 h, u32 addr, void *buf, u32 len, u32 *done);
-typedef int (*er_fn)(u32 h, u32 first, u32 count);
-#define FL_READ  ((rw_fn)0x00009141)
-#define FL_WRITE ((rw_fn)0x00008fb3)
-#define FL_ERASE4K ((er_fn)0x000092b9)
-#define HANDLE (*(volatile u32 *)0x000bb5f4)
+#include "wup_flash.h"                             /* (Nintendo's flash driver, or the kernel's) */
+#ifdef WUP_KERNEL
+#include "wupk.h"
+#endif
 #ifndef FS_BOUNCE
 #define FS_BOUNCE 0x00220000u            /* the menu: uncached, DMA-reachable. Apps (libwup): 0x34E000 (include/handoff.h) */
 #endif
@@ -87,6 +85,29 @@ static int has_screens(u32 base) {                    /* language data: how many
     memcpy(&n, BOUNCE, 4);
     return n >= 1 && n <= 1024;
 }
+#ifdef WUP_KERNEL
+/* -> ext[] (the kernel: no firmware to ask). The copy that holds our filesystem; on a pad that has none yet, the one the
+   selector does not use (the UIC's EEPROM 0x1256: 1 = Nintendo uses Lang2), and only if the one in use really holds
+   Nintendo's screens: in any doubt no filesystem, rather than a wrong copy formatted */
+static int place(int repair) {
+    (void)repair;
+    int f1 = has_fs(LANG1), f2 = has_fs(LANG2);
+    if (f1 < 0 || f2 < 0) return -1;
+    u32 at;
+    if (f1 == 1 && f2 != 1) at = LANG1;
+    else if (f2 == 1 && f1 != 1) at = LANG2;
+    else if (f1 == 1 && f2 == 1) return -1;           /* (both: which is ours is not known) */
+    else {
+        u8 q[4] = { 0x03, 0x12, 0x56, 1 }, sel = 0xff;
+        if (WUPK->uic(q, 4, &sel, 1) || sel > 1) return -1;
+        u32 used = sel == 1 ? LANG2 : LANG1;
+        if (!has_screens(used)) return -1;
+        at = used == LANG2 ? LANG1 : LANG2;
+    }
+    ext[0].lo = at; ext[0].hi = at + LANG_SIZE;
+    return 0;
+}
+#else
 /* -> ext[]; 0, or < 0: not known (no filesystem). repair: the menu, which may put a 1.0.0-damaged pad right */
 static int place(int repair) {
     lang_t l = { 0 };
@@ -109,6 +130,7 @@ static int place(int repair) {
     ext[0].lo = at; ext[0].hi = at + LANG_SIZE;
     return 0;
 }
+#endif
 
 static u8 rbuf[256], pbuf[256], lbuf[64] __attribute__((aligned(4)));
 static struct lfs_config cfg = {

@@ -6,15 +6,10 @@
  * Two 4 KB sectors (0xB0000, 0xB1000), below both firmware banks (docs/ARCHITECTURE.md), are used alternately: each save
  * goes to the sector not holding the newest record, with seq+1 and a CRC, so a power loss mid-save
  * keeps the previous record. The driver DMAs, so data passes through an uncached buffer (0x34E000). */
+#include "wup_flash.h"
 #include "config.h"
 #include "armcpu.h"
 typedef unsigned u32; typedef unsigned char u8;
-typedef int (*rw_fn)(u32 h, u32 addr, void *buf, u32 len, u32 *done);
-typedef int (*er_fn)(u32 h, u32 first, u32 count);
-#define FL_READ  ((rw_fn)0x00009141)
-#define FL_WRITE ((rw_fn)0x00008fb3)
-#define FL_ERASE4K ((er_fn)0x000092b9)
-#define HANDLE (*(volatile u32 *)0x000bb5f4)
 #define SECT0 0x000b0000u
 #define SECT1 0x000b1000u
 #define BUF ((u8 *)0x0034e000u)                 /* uncached, DMA-reachable: libwup's flash bounce buffer (handoff.h) */

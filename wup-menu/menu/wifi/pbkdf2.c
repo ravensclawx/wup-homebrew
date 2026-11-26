@@ -2,6 +2,9 @@
 #include "wifi_hw.h"
 #ifdef HOST_TEST
 #define DLY(x) ((void)0)
+#elif defined(WUP_KERNEL)
+#include "wupk.h"
+#define DLY(ms) WUPK->sleep(ms)
 #else
 #define DLY ((void (*)(int))0x00089ae4)
 #endif

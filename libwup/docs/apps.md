@@ -3,7 +3,7 @@
 ## The menu
 
 - **Hold A** while turning the pad on, or set Settings > System > Boot to Autoboot. Without that the pad boots the
-  stock firmware. Power off by holding POWER, as always.
+  stock firmware. Press POWER to turn it off.
 - **A** opens the selected app, **X** Settings, **Y** the Netloader, **B** goes back.
 - Settings: **Network** (Wi-Fi, File Sharing), **Appearance**, **Brightness** (10 to 100 %; the console's own setting is never touched), **System** (Boot, Date & Time, Developer Mode, firmware, storage).
 - **File Sharing** is FTP on port 21 (passive): `ftp://<pad IP>` in any FTP app. With a password the user name is
@@ -54,12 +54,13 @@ It defines `WUP_APP("Title")` and `main()`; returning from `main` goes back to t
 | **Another app** | `wup_exec(path, arg)` |
 | **Unzip** | `wup_inflate()`: raw deflate (a zip entry) |
 
-Call `wup_sleep()` (or `wup_lvgl_run()`) in every loop: the stock firmware's own tasks (input, radio) run then.
+Call `wup_sleep()` (or `wup_lvgl_run()`) in every loop: it gives the kernel's other tasks a turn (and runs
+`net = raw` networking).
 
-**Size.** The pad has 4 MB of RAM. A small app's code, data and stack fit 192 KB at 0x350000; a larger one
-(`large = yes`, or automatically) gets 368 KB more for code and its `.bss` and heap in the 1.4 MB below the screen.
-Code that still does not fit can go there too (`text_in_big = lvgl`, `bearssl` or source patterns): it is stored in the `.wup`
-and loaded below the screen before `main()`, at the cost of that much heap.
+**Size.** The pad has 4 MB of RAM. Every app gets one flat block of about 1.8 MB (0x80000-0x253000,
+`include/wup_ram.h`): its code, constants and data, its `.bss`, and the rest is its heap. The screens and the sound
+rings are the kernel's, outside it. (Version 1's `large`, `screen8` and `text_in_big` settings mean nothing now: one
+layout.)
 
 ## Tests
 
@@ -70,5 +71,5 @@ like any app, on the pad or in the emulator:
 ```
 python3 tools/wupbuild.py tests/sockets
 python3 ../wup-menu/tools/mkflash.py ../wup-firmware/flash.bin build/wup.bin /apps/sockets_test/sockets_test.wup=build/apps/sockets_test.wup
-../wup-emu/wup-emu --flash build/wup.bin           # (wup-menu's mkflash puts the menu and the app in a copy of your dump)
+../wup-emu/wup-emu --flash build/wup.bin --hold a 0 3000   # (wup-menu's mkflash puts wup-homebrew and the app in a copy of your dump)
 ```

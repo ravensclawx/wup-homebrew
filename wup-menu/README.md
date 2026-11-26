@@ -1,16 +1,17 @@
 # wup-menu
 
-The **Homebrew Menu** for the **Wii U GamePad** (model WUP-010): a small hook in the pad's own firmware, a loader,
-and the menu. Everything was worked out from the pad's own firmware, and it runs on a real GamePad.
+The **Homebrew Menu** for the **Wii U GamePad** (model WUP-010), and how wup-homebrew gets onto a pad: the early hook
+in the pad's own firmware, the install tools, the menu, App Store and Software Update. They run on the
+[wup-homebrew kernel](../kernel).
 
 <p align="center"><img src="docs/images/home.png" width="427" alt="The Homebrew Menu"> <img src="docs/images/settings.png" width="427" alt="Settings"></p>
 
-- **Hold A at power-on** (or set Autoboot) for the Homebrew Menu. Without A the pad boots Nintendo's firmware
-  exactly as before.
+- **Hold A at power-on** (or set Autoboot) for wup-homebrew. Without A the pad boots Nintendo's firmware exactly as
+  before. The Power button turns it off.
 - The app list, Settings, Wi-Fi setup with an on-screen keyboard, battery, signal and a clock.
 - **[WUP Boy](https://github.com/ravensclawx/wup-boy)** (in the App Store): Game Boy and Game Boy Color games you copy over File Sharing, with
   save states, rewind and fast forward. No games included.
-- **App Store** and **Software Update** in the box: apps from the project's catalogue, newer Homebrew Menus, over HTTPS.
+- **App Store** and **Software Update** in the box: apps from the project's catalogue, newer kernels and menus, over HTTPS.
 - **Wi-Fi** on normal WPA2 networks (5 GHz), also ones that hide their name (Other…). **File sharing** over FTP for the pad's flash filesystem (8 MB).
   **Netloader**: send an app from a computer and run it.
 
@@ -22,26 +23,29 @@ Apps are built with [libwup](../libwup), the SDK; the menu itself is an app like
   Wii U app that installs through the GamePad's own firmware update.
 - **Over UART** (soldering): `tools/flash/`, see [docs/install.md](docs/install.md).
 
-After that, updates go over Wi-Fi. Read the safety notes in [docs/architecture.md](docs/architecture.md) first.
+- **Over Wi-Fi**, on a pad running the Homebrew Menu with Developer Mode on: `tools/install.py`.
+
+After that, Software Update keeps it current. Read the safety notes in [docs/architecture.md](docs/architecture.md) first.
 
 ## Layout
 
 | Folder | What |
 |---|---|
-| `boot/` | the hook patched into the firmware, and the loader |
+| `boot/` | the early hook, patched into the start of Nintendo's firmware |
 | `menu/` | the Homebrew Menu |
-| `tools/` | the install: `mkflash.py`, `menu_install.py`, `mkinstaller.py` (the Wii U installer's payload), `flash/` (UART) |
+| `tools/` | the install: `mkflash.py` (what an install writes; emulator images), `install.py` (Wi-Fi), `flash/` (UART), `mkrepo.py` (the catalogue) |
 | `docs/` | [architecture](docs/architecture.md), [install](docs/install.md), [wiring](docs/wiring.md), [roadmap](docs/roadmap.md) |
 
 ## Build
 
-Needs [libwup](../libwup) next to this folder (or `LIBWUP=path`) and what it needs (LLVM,
-Python 3 with Pillow, meson, ninja).
+Needs [libwup](../libwup) and the [kernel](../kernel) next to this folder (or `LIBWUP=path`) and what they need
+(LLVM, Python 3 with Pillow, meson, ninja).
 
 ```
+make -C ../kernel                                               # -> ../kernel/build/kernel.bin
 python3 ../libwup/tools/wupbuild.py menu                        # -> build/apps/homebrew_menu.wup
 python3 tools/mkflash.py DUMP.bin build/emu.bin                 # into a copy of your pad's flash dump: try it in wup-emu
-WUP_PORT=tcp:PAD_IP python3 tools/menu_install.py menu          # update a pad's menu over Wi-Fi (Developer Mode on)
+WUP_PORT=tcp:PAD_IP python3 tools/install.py                    # install or update a pad over Wi-Fi (Developer Mode on)
 ```
 
 The emulator is [wup-emu](../wup-emu); dumps of your own pad stay outside every repository
@@ -56,7 +60,7 @@ The emulator is [wup-emu](../wup-emu); dumps of your own pad stay outside every 
 
 App Store and Software Update read one catalogue in the format of the Homebrew App Store's libget
 (`repo.json`, `zips/<name>.zip`, `packages/<name>/icon.png`), at `CATALOG_URL` (`common/catalog.h`).
-`python3 tools/mkrepo.py` builds it from the apps and the menu into `build/repo`; publish that folder over HTTPS
+`python3 tools/mkrepo.py` builds it from the apps, the kernel and the menu into `build/repo`; publish that folder over HTTPS
 (GitHub Pages, for example). `tools/repo_server.py` serves it from this computer with a test CA, for test builds.
 
 ## Licence

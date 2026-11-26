@@ -2,20 +2,27 @@
 
 ## From a Wii U (no soldering)
 
-Open the **Homebrew Menu Installer** on a Wii U running Aroma and choose Install ([wup-menu-installer](../../wup-menu-installer)).
-The console sends the GamePad its own firmware with the hook and the menu added; the GamePad writes it to its other
-firmware bank and switches over only when it is complete. Remove (same app) puts the original firmware back.
-Afterwards: hold A while turning the GamePad on.
+The **Homebrew Menu Installer** ([wup-menu-installer](../../wup-menu-installer)) installs through the GamePad's own
+firmware update: the console sends the pad its own firmware with our changes built in; the pad writes it to its other
+firmware bank and switches over only when it is complete. Remove puts the original firmware back. Today it installs
+version 1; the version 2 installer (which also upgrades a version 1 pad) comes with the release.
 
-Proven on a real Wii U (Aroma) and GamePad, 2026-11-18: both banks stock (DRXUtil's Original firmware, twice), then
-Install: the pad switched to bank 2 and holding A opened the Homebrew Menu. Before that, the firmware it sends was checked
-byte for byte against the UART install and booted in the emulator (wup-menu-installer `test/test_fwpatch.py`).
+## Over Wi-Fi (a pad running the Homebrew Menu)
+
+With Developer Mode on (Settings > System):
+```
+make -C ../kernel && python3 ../libwup/tools/wupbuild.py menu
+WUP_PORT=tcp:PAD_IP python3 tools/install.py
+```
+It writes what `tools/mkflash.py` lists, each 4 KB sector erased, written and read back by the menu itself (the debug
+server's `fw` command): the menu and the kernel (headers last), the early hook, and last the 4-byte branch to it.
+Sectors that already hold the new bytes are skipped, so the same command updates.
 
 ## Over UART (soldering)
 
 The tools are in `tools/flash/`. Everything for backing up and flashing a real GamePad over its UART-boot pads: wuptool (the payload
 the boot ROM's UART loader runs, and its host tool) plus a safety wrapper. Needed once per pad: after the
-custom firmware is installed, updates go over Wi-Fi (`tools/menu_install.py`).
+custom firmware is installed, updates go over Wi-Fi (`tools/install.py`).
 
 | File | What it is |
 |---|---|
@@ -60,45 +67,31 @@ during a read it's harmless.
    - **Copy the backup somewhere safe** (it is your whole pad). Optionally also save the UIC
      EEPROM: `python3 tools/flash/wuptool/wuptool.py eeprom ../wup-firmware/backups/eeprom.bin`.
 
-3. **Install the boot menu.** UART-boot mode again (power-cycle), then run:
+3. **Install wup-homebrew.** Build the kernel and the menu (`make -C ../kernel`, `python3
+   ../libwup/tools/wupbuild.py menu`), UART-boot mode again (power-cycle), then run:
    ```
    python3 tools/flash/gamepad_flash.py install-cfw
    ```
-   - It builds the hook, the loader and the menu (`tools/mkflash.py`), which refuses anything but
-     firmware rev 7677 and checks the bytes it replaces in Product1.
-   - It writes about 6 **64 KiB blocks**, each read from the pad first and changed only in its own bytes:
-     the menu (0x30000 onwards), the loader (0x10000), then the two hook blocks in Product1 (0x1b0000,
-     0x160000), the bl last. Everything but those two patches is in the free gap 0x10000-0xFFFFF.
-     Apps go on afterwards through file sharing or wuplink.
+   - `tools/mkflash.py` lists what changes; it refuses anything but firmware rev 7677 and checks the bytes it
+     replaces in Product1.
+   - It writes about 8 **64 KiB blocks**, each read from the pad first and changed only in its own bytes: the menu
+     and the kernel in the gap (0x90000-0xFFFFF, headers last), the early hook's block in Product1 (0x150000), and
+     last the block with the branch to it (0x100000). Apps go on afterwards through file sharing or wuplink.
    - Each block is read back and verified after writing.
 
 4. **Test.**
    - Unground pad 2 and power on normally. The stock firmware must boot exactly as before.
-   - Then power off, **hold A** and power on: you should get the boot menu.
+   - Then power off, **hold A** and power on: you should get the Homebrew Menu.
    - If something looks wrong, go straight to step 5.
 
 5. **Undo (any time).** UART-boot mode, then run:
    ```
    python3 tools/flash/gamepad_flash.py restore ../wup-firmware/backups/gamepad_YYYYMMDD-HHMMSS
    ```
-   - This writes the original contents of the CFW blocks back and verifies them.
+   - This writes the original contents of the blocks we change in Product1 back (the branch's first) and verifies
+     them. The kernel and the menu stay in the gap, unused.
    - `compare` reports, block by block, whether the pad currently holds stock or CFW.
    - `--block ADDR` restores any other 64 KiB block from the backup.
-
-## Rehearsal results (emulator, 2026-11-14)
-
-All against a simulated chip whose upper 16 MiB differs from the lower half:
-
-| Step | Result |
-|---|---|
-| Upload | the wuptool payload booted through the emulated boot ROM UART loader; `info` showed the emulated flash ID (the real pad reports 20 BA 19, Micron N25Q256) |
-| `backup` | 32 MiB, bit-identical to the chip, upper half included (so 4-byte addressing works) |
-| `install-cfw` | 4 blocks written and verified. Normal boot was byte-identical to stock; holding A showed the boot menu (tested with the first CFW design; the current image from `tools/mkflash.py` has been boot-tested in the emulator, its UART write not yet) |
-| `restore` | chip bit-identical to the original again |
-
-**Fixed in wuptool.py:** its `read` command dropped the bytes that `wait_for("OK")` had already read
-ahead into `rx_buf`, so a read could wait forever for data it already had. It now starts from
-`rx_buf`, as `cmd_read_data` always did. `gamepad_flash.py` uses `cmd_read_data`.
 
 ## Rules
 

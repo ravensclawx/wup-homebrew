@@ -714,7 +714,7 @@ static void repo_add_done(void) {
 }
 static void on_repo_add(lv_event_t *e) { (void)e; ask_text("Enter the repository's address", "https://", 4, 150, 0, repo_add_done); }
 static void repos_screen(lv_obj_t *scr) {
-    lv_obj_t *l = page(scr, "Repositories", catalog_repos() ? "B Back    X Remove    A Select" : "B Back    A Select");
+    lv_obj_t *l = page(scr, "Repositories", catalog_repos() ? "X Remove    B Back    A Select" : "B Back    A Select");
     for (int i = 0; i < catalog_repos(); i++)
         row(l, WUP_SYMBOL_GLOBE, catalog_repo_name(i), (catalog_repo_failed >> i & 1) ? "Not Reachable" : NULL, on_repo, (void *)(intptr_t)i);
     row(l, LV_SYMBOL_PLUS, "Add Repository\xE2\x80\xA6", NULL, on_repo_add, NULL);

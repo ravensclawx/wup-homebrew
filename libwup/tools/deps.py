@@ -20,6 +20,8 @@ DEPS = {   # name: (folder, git URL, tag/branch, license[, folders: a sparse che
     'bearssl': (os.path.join(paths.THIRD, 'bearssl'), 'https://www.bearssl.org/git/BearSSL', 'v0.6', 'MIT'),
     'picohttpparser': (os.path.join(paths.THIRD, 'picohttpparser'), 'https://github.com/h2o/picohttpparser.git', 'dd573d8fa9264c646a400e96ce9f07dea6f156e4', 'MIT or Perl'),
     'jsmn': (os.path.join(paths.THIRD, 'jsmn'), 'https://github.com/zserge/jsmn.git', 'v1.1.0', 'MIT'),
+    # inflate a piece at a time, with a 32 KB window: the App Store's large files (a game's data)
+    'uzlib': (os.path.join(paths.THIRD, 'uzlib'), 'https://github.com/pfalcon/uzlib.git', 'v2.9.5', 'Zlib'),
     # WUP Boy (its own repository, github.com/ravensclawx/wup-boy): the emulator core and its sound (examples/sdl2/minigb_apu: no SDL in it)
     'peanut-gb': (os.path.join(paths.THIRD, 'peanut-gb'), 'https://github.com/deltabeard/Peanut-GB.git', '33f053b9e70297ff0bab53da527c19126384d911', 'MIT'),
     # wup-doom (its own repository): the engine, Chocolate Doom's OPL music player, and the OPL2 (YM3812) emulator for it

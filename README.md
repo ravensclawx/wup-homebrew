@@ -51,9 +51,13 @@ Menu, over Wi-Fi ([wup-menu/docs/install.md](wup-menu/docs/install.md)).
 
 ## Apps
 
-Apps come to the GamePad through the App Store, from any repositories you add, or over File Sharing (FTP). Earlier
-apps, archived for now: [WUP Stream](https://github.com/ravensclawx/wup-stream) (a computer's picture and sound on the
-pad) and [WUP Boy](https://github.com/ravensclawx/wup-boy) (Game Boy games).
+Apps come to the GamePad through the App Store, from any repositories you add, or over File Sharing (FTP):
+
+- [WUP Stream](https://github.com/ravensclawx/wup-stream): the GamePad as a wireless screen and controller for your
+  computer: picture, sound, every input, the microphone and the camera.
+- Hello World: libwup's sample.
+
+[WUP Boy](https://github.com/ravensclawx/wup-boy) (Game Boy games) is archived for now: emulators are next.
 
 Write your own with [libwup](libwup): `kit = yes` in an app's `app.cfg` gives it the menu's look.
 

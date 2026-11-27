@@ -171,6 +171,8 @@ void wup_net_info(uint32_t *ip, uint32_t *mask, uint32_t *gw, uint32_t *dns);
 int wup_net_online(void);
 uint32_t wup_net_ip(void);                           /* the pad's address (network byte order) */
 const char *wup_net_ip_str(void);                    /* "192.168.4.101" */
+int wup_net_tx_room(void);                           /* packets the radio's send queue takes now (of 16): a sender that
+                                                        keeps some free leaves room for what must not wait (WUP Stream) */
 int wup_net_stats(char *out, int n);
 void wup_net_time(void);                             /* the date and time from the network (SNTP), once networking is up */
 void wup_net_tx_pacing(unsigned frames_per_ms_x10, unsigned burst);   /* (diagnostics) */                 /* "rx=... rx_dropped=... pool_err=..." (diagnostics) */

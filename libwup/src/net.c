@@ -19,6 +19,7 @@
 #include "lwip/tcpip.h"
 #include "wup_netif.h"
 #include "wup.h"
+#include "wupk.h"
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32;
 static int net_up, stack_up;
 
@@ -163,6 +164,7 @@ void wup_net_info(uint32_t *ip, uint32_t *mask, uint32_t *gw, uint32_t *dns) {
 }
 int wup_net_online(void) { return net_up; }
 uint32_t wup_net_ip(void) { return net_up ? wup_netif_ip() : 0; }
+int wup_net_tx_room(void) { return WUPK->wifi_tx_room(); }
 const char *wup_net_ip_str(void) { static char b[16]; ip4_addr_t a; ip4_addr_set_u32(&a, wup_net_ip()); return ip4addr_ntoa_r(&a, b, sizeof b); }
 
 /* counters for diagnosing a busy link: frames, drops, pool and heap exhaustion, retransmissions */

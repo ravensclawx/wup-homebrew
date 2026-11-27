@@ -8,10 +8,9 @@ every firmware address used was derived from that build.
 | Folder | What |
 |---|---|
 | `boot/` | `early.c`: the early hook (in two pieces over unused text in Nintendo's firmware) |
-| `menu/` | The Homebrew Menu, an app like the others: `main.c` (state, network, apps), `ui.c` (LVGL screens), `wifi/`, `ftpd.c`, `wuplink.c` (the Netloader), `dbgsrv.c` (Developer Mode), `bundle.c` (the apps a Wii U install brings) |
-| `tools/` | `mkflash.py` (the install, and emulator images), `install.py` (install and update over Wi-Fi), `mkrepo.py` (the catalogue), `flash/` (the UART install and backups) |
-| `apps/` | App Store and Software Update |
-| `common/` | what the menu and its apps share: `catalog.c` (the catalogue: libget's format), `tone.h`, `version.h` |
+| `menu/` | The Homebrew Menu, an app like the others: `main.c` (state, network, apps), `ui.c` (LVGL screens), `wifi/`, `ftpd.c`, `wuplink.c` (the Netloader), `dbgsrv.c` (Developer Mode) |
+| `tools/` | `mkflash.py` (the install, and emulator images), `install.py` (install and update over Wi-Fi), `mkinstaller.py` (the Wii U installer's payload), `mkrelease.py` (Software Update's zip), `mkrepo.py` (an App Store repository), `flash/` (the UART install and backups) |
+| `common/` | `catalog.c` (the App Store's repositories: libget's format), `release.c` (Software Update: GitHub Releases), `version.h` |
 
 Built with [libwup](../../libwup) and the [kernel](../../kernel) next to this folder. Installing:
 [install.md](install.md). The emulator: [wup-emu](../../wup-emu).
@@ -34,6 +33,10 @@ Nothing in the boot chain checks signatures or checksums:
 - **The kernel** ([kernel](../../kernel)) sets the pad up as the stock firmware does, and runs the menu from its
   slot. To start an app the menu stages its image, fills in the hand-off block (libwup `include/handoff.h`) and
   returns `WUP_HANDOFF_RUN` (`wup_exec`); the kernel runs it, then the menu again. Each app gets the whole app block.
+- **A Wii U install** ([wup-menu-installer](../../wup-menu-installer)) can only write a firmware bank: it brings the
+  kernel and the menu as a bundle at 0x2C9000 in the bank (after its last section). The early hook takes the kernel
+  from a bundle in the bank that runs first, then from its slot; the kernel copies the bundle into the slots at that
+  first start and removes it (`kernel/src/app.c`), and from then on the pad is as one installed over UART.
 - **Firmware updates** (the pad's side, LVC 0x2b122): the console's update is written to the bank the pad is *not*
   running, then activated with the bank selector byte. A stock update to a pad with wup-homebrew writes a bank
   without the early hook: the pad then boots stock, and our parts in the gap stay until it is installed again.

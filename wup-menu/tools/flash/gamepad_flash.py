@@ -9,13 +9,13 @@
     common options: --port /dev/cu.usbserial-XXXX  (default: auto-detect, like wuptool)
 
 Safety rules this script enforces (see README.md):
-  * wuptool's write erases whole 64 KiB blocks, so every write here is a complete, 64 KiB-aligned
-    block: install-cfw reads it from the pad and changes only its own bytes; restore takes it from a backup.
-  * After writing a block it reads it back and verifies.
+  * install-cfw writes 4 KiB sectors (the payload's w), reading from the pad only those partly Nintendo's;
+    restore writes whole 64 KiB blocks from a backup (wuptool's W erases 64 KiB).
+  * Every write is verified: install-cfw by a CRC worked out on the pad (K), restore by reading back.
   * A backup is rejected if its upper 16 MiB mirrors the lower 16 MiB (3-byte addressing dump),
     if it is not exactly 32 MiB, or if the Product1 INDX table is missing.
 """
-import argparse, datetime, hashlib, json, os, struct, subprocess, sys, time
+import argparse, datetime, hashlib, json, os, struct, subprocess, sys, time, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -48,8 +48,8 @@ def connect(port):
     if ATTACHED: return connect_attached(port)
     port = port or wuptool.find_serial_port()
     if not port: sys.exit('no serial port found; pass --port')
-    print('Power the GamePad on in UART-boot mode first (UART-boot pad grounded: the screen stays off),')
-    print('then the payload is sent. If it times out, power-cycle the pad and run the command again.')
+    print('The GamePad must already be on in UART-boot mode (pad 2 grounded, then powered on: the screen stays off).')
+    print('Its loader takes one upload per power-on: if this times out, power-cycle it and run the command again.')
     t = wuptool.WUPTool(port)
     t.connect()
     return t
@@ -318,42 +318,98 @@ def hook_blocks(mk, img):
     return out
 
 
+SECTOR = 0x1000
+
+
+def pad_crc(t, addr, n):
+    """the CRC-32 of a flash range, worked out on the pad (the payload's K): checking without reading it back"""
+    t.send_cmd(b'K'); t.send_u32(addr); t.send_u32(n)
+    rest = _recv_until(t, b'OK\r\n', 10)
+    end = time.time() + 5
+    while len(rest) < 4:
+        if time.time() > end: raise ReadError('0x%07x: no CRC from the pad' % addr)
+        rest += t.ser.read(4 - len(rest))
+    t.rx_buf = rest[4:]
+    return struct.unpack('<I', rest[:4])[0]
+
+
+def write_sectors(t, addr, data):
+    """4 KB subsectors (the payload's w): only these erased, then checked by CRC on the pad"""
+    t.send_cmd(b'w'); t.send_u32(addr); t.send_u32(len(data))
+    _recv_until(t, b'GO\r\n', 30)
+    for o in range(0, len(data), 4096): t.ser.write(data[o:o + 4096])
+    t.ser.flush()
+    _recv_until(t, b'DONE\r\n', 30)
+    if pad_crc(t, addr, len(data)) != zlib.crc32(data): sys.exit('0x%07x: VERIFY FAILED. Keep the pad on and run install-cfw again.' % addr)
+
+
 def cmd_install(a):
-    """The install (tools/mkflash.py patches): read from the pad what it needs, change only those bytes (the rest of
-    each 64 KiB block written back as it was), write and verify each block, each when its last patch comes: the menu
-    and the kernel (their headers last), the early hook, and last the branch to it: until that block the pad boots
-    exactly as before. Then the bank selector back to Product1, only if it was not."""
+    """The install (tools/mkflash.py patches), by 4 KB sectors: a sector only partly ours is read from the pad (a few,
+    in Nintendo's firmware); the pad works out each sector's CRC, so what is already there is skipped and each write
+    is checked without reading it back. In the patches' order: each slot's header blanked, its image, its header,
+    then the early hook, and last the branch to it: until then the pad boots exactly as before."""
     mk = mkflash_()
     t = connect(a.port)
     try:
-        blocks = {}
-        def blk(b):
-            if b not in blocks: print('0x%07x: reading' % b, flush=True); blocks[b] = bytearray(read_block(t, b))
-            return blocks[b]
+        t0 = time.time()
+        cache = {}
+        def sector(x):                                 # the pad's sector, read (twice, agreeing) only when needed
+            if x not in cache: cache[x] = bytearray(read_block(t, x, SECTOR))
+            return cache[x]
         def read(x, n):
-            b = x & ~(BLOCK - 1)
-            if x + n > b + BLOCK: sys.exit('a read crosses a block')
-            return bytes(blk(b)[x - b:x - b + n])
+            out = b''
+            while n:
+                s0 = x & ~(SECTOR - 1); k = min(n, s0 + SECTOR - x)
+                out += bytes(sector(s0)[x - s0:x - s0 + k]); x += k; n -= k
+            return out
         pl = mk.patches(read)
-        old = {}; last = {}
-        for i, (x, d) in enumerate(pl):
-            for o in range(0, len(d)):
-                if o and (x + o) & (BLOCK - 1): continue
-                b = (x + o) & ~(BLOCK - 1); blk(b); old.setdefault(b, bytes(blocks[b])); last[b] = i
-        for x, d in pl:
-            for o in range(len(d)):
-                b = (x + o) & ~(BLOCK - 1); blocks[b][x + o - b] = d[o]
-        for b in sorted(last, key=lambda b: (last[b], -b)):
-            if bytes(blocks[b]) == old[b]: print('0x%07x: already installed' % b); continue
-            print('0x%07x: writing' % b, flush=True)
-            t.cmd_write_data(b, bytes(blocks[b]))
-            if read_block(t, b) != bytes(blocks[b]): sys.exit('0x%07x: VERIFY FAILED. Keep the pad on and run install-cfw again.' % b)
-            print('0x%07x: verified' % b)
-        if read_block(t, SELECTOR_SECTOR, 0x1000)[0] != 0:            # it boots Product2: back to Product1 (has the hook)
-            b0 = bytearray(read_block(t, 0)); b0[0xf000] = 0
-            print('0x0000000: the bank selector -> Product1', flush=True)
-            t.cmd_write_data(0, bytes(b0))
-            if read_block(t, 0) != bytes(b0): sys.exit('0x0000000: VERIFY FAILED. Keep the pad on and write block 0 again.')
+        touched = []                                   # per patch: the sectors it touches
+        for x, d in pl: touched.append(list(range(x & ~(SECTOR - 1), x + len(d), SECTOR)))
+        allsec = sorted({s for ts in touched for s in ts})
+        def full(s, upto):                             # True if patches 0..upto cover all of sector s
+            cov = bytearray(SECTOR)
+            for x, d in pl[:upto + 1]:
+                lo, hi = max(x, s), min(x + len(d), s + SECTOR)
+                if lo < hi: cov[lo - s:hi - s] = b'\1' * (hi - lo)
+            return all(cov)
+        print('checking %d sectors' % len(allsec), flush=True)
+        crc = {s: pad_crc(t, s, SECTOR) for s in allsec}
+        def state(s, upto):                            # sector s after patches 0..upto
+            b = bytearray(b'\xff' * SECTOR) if full(s, len(pl) - 1) and s not in cache else bytearray(sector(s))
+            for x, d in pl[:upto + 1]:
+                lo, hi = max(x, s), min(x + len(d), s + SECTOR)
+                if lo < hi: b[lo - s:hi - s] = d[lo - x:hi - x]
+            return bytes(b)
+        final = {s: state(s, len(pl) - 1) for s in allsec}
+        changed = {s for s in allsec if zlib.crc32(final[s]) != crc[s]}
+        if not changed: print('already installed'); return
+        on_pad = dict(crc)
+        for i, ts in enumerate(touched):
+            later = [s for s in ts if any(s in touched[j] for j in range(i + 1, len(pl)))]
+            nxt = set(touched[i + 1]) if i + 1 < len(pl) else set()
+            run = []
+            for s in ts:
+                if s in later:                         # (a header blanked: only if what follows it changes)
+                    if not (nxt & changed): continue
+                    data = state(s, i)
+                elif s in changed: data = final[s]
+                else: continue
+                if zlib.crc32(data) == on_pad[s]: continue
+                run.append((s, data))
+            j = 0                                      # (runs of neighbouring sectors: one command each)
+            while j < len(run):
+                k = j
+                while k + 1 < len(run) and run[k + 1][0] == run[k][0] + SECTOR: k += 1
+                addr = run[j][0]; data = b''.join(d for _, d in run[j:k + 1])
+                print('0x%07x: writing %d KB' % (addr, len(data) >> 10), flush=True)
+                write_sectors(t, addr, data)
+                for s, d in run[j:k + 1]: on_pad[s] = zlib.crc32(d)
+                j = k + 1
+        if read_block(t, SELECTOR_SECTOR, 16)[0] != 0:  # it boots Product2: back to Product1 (has the hook)
+            b0 = bytearray(read_block(t, SELECTOR_SECTOR, SECTOR)); b0[0] = 0
+            print('0x000f000: the bank selector -> Product1', flush=True)
+            write_sectors(t, SELECTOR_SECTOR, bytes(b0))
+        print('%.0f s' % (time.time() - t0))
     finally: t.close()
     print('INSTALLED. Unground the UART-boot pad and power on: hold A for wup-homebrew; nothing held: the stock firmware.')
 

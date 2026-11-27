@@ -145,8 +145,10 @@ static void autojoin_step(void) {
 /* ---- starting and installing apps */
 const char *menu_start(const char *path) {
     volatile wup_handoff_t *pb = WUP_HANDOFF;
+    if (dbgsrv_active()) return "A computer is connected in Developer Mode. Try again when it's done.";   /* (an install over
+                                                       Wi-Fi is the menu's own: leaving would cut it off, half written) */
     int e = wup_exec(path, 0);
-    if (e == -3) return "It was made for an older version of the Homebrew Menu. Update it in the App Store.";
+    if (e == -3) return "It was made for an older version of the Homebrew Menu. Look for a newer one.";
     if (e) return "It may be damaged.";
     pb->flags = (radio_ready ? WUP_HO_RADIO_READY : 0) | (M.ip[0] ? WUP_HO_WIFI_JOINED : 0);
     pb->menu_sel = (uint32_t)ui_selected();
@@ -183,16 +185,10 @@ const char *menu_install_received(int run) {
     return run ? menu_start(path) : 0;
 }
 
-/* Reset: the apps and their data, the clock and file sharing settings (the files) and the menu's settings (Wi-Fi too)
-   go. The menu, the firmware and the system's own apps stay: App Store and Software Update, with their records, so
-   that a reset pad can still get apps and updates. Files are removed, not the flash under them erased block by block
-   (that took minutes with a few MB stored). The GamePad is then turned off by hand: the next start is a new pad's.
-   < 0 if something could not be removed. */
-static const char *const kept[] = { "/apps/app_store", "/apps/software_update", "/.get/packages/app_store", "/.get/packages/software_update", "/.get/bundled" };
-static int is_kept(const char *p) {
-    for (unsigned i = 0; i < sizeof kept / sizeof kept[0]; i++) { size_t n = strlen(kept[i]); if (!strncmp(p, kept[i], n) && (!p[n] || p[n] == '/')) return 1; }
-    return 0;
-}
+/* Reset: the apps and their data, the App Store's records and repositories, the clock and file sharing settings (the
+   files) and the menu's settings (Wi-Fi too) go: everything in the filesystem. The menu and the kernel stay (their own
+   flash). Files are removed, not the flash under them erased block by block (that took minutes with a few MB stored).
+   The GamePad is then turned off by hand: the next start is a new pad's. < 0 if something could not be removed. */
 static int wipe(const char *dir, int depth, void (*tick)(void)) {    /* everything in dir but what is kept; < 0: could not */
     static char path[8][192];
     if (depth >= 8) return -1;
@@ -206,7 +202,6 @@ static int wipe(const char *dir, int depth, void (*tick)(void)) {    /* everythi
         }
         lfs_dir_close(&fs_lfs, &d);
         if (!found) return 0;
-        if (is_kept(path[depth])) { skip++; continue; }
         if (inf.type == LFS_TYPE_DIR) wipe(path[depth], depth + 1, tick);
         if (lfs_remove(&fs_lfs, path[depth])) skip++;      /* (a folder with something kept in it stays) */
         if (tick) tick();
@@ -243,21 +238,18 @@ int main(void) {
     if (have && M.cfg.wifi_saved) aj_state = 1;
     share_load();
     clock_load();
-    M.setup = !resumed && bundle_pending();            /* the Wii U install's apps are to be put on the pad: after the
-                                                          menu has faded in, behind "Setting Up..." (ui.c, bundle.c) */
     apps_scan();
     sys_power(&M.power);
     wup_lvgl_init();
     wifi_wait = menu_wait;                             /* (bringing the radio up and scanning take seconds) */
     ui_start(resumed ? (int)pb->menu_sel : 0);
-    if (!resumed) sound_chime();                       /* the pad has just started: the chime (not after an app) */
     while (!leaving) {
         wup_lvgl_run(10);
         autojoin_step();
         menu_poll();
         ui_step();
     }
-    sound_off();                                       /* (the chime's thread, the audio) */
+    sound_off();
     wuplink_close();
     if (ftp_open) ftpd_close();
     if (dbg_open) dbgsrv_close();

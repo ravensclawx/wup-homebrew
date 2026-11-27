@@ -223,6 +223,48 @@ void main(void)
             break;
         }
 
+        case 'w':  // Write Flash by 4 KB subsectors (addr and len 4 KB aligned): only those erased
+        {
+            u32 addr = recv_u32();
+            u32 len = recv_u32();
+            if (len == 0 || (addr | len) & 0xFFF || (addr + len) > FLASH_SIZE) { UART_Print("ERR\r\n"); break; }
+            Flash_Set4ByteAddr(addr >= 0x1000000 || (addr + len) > 0x1000000);
+            for (u32 o = 0; o < len; o += 0x1000) Flash_EraseSubsector(addr + o);
+            UART_Print("GO\r\n");
+            for (u32 pos = addr; pos < addr + len; pos += PAGE_SIZE)
+            {
+                for (u32 i = 0; i < PAGE_SIZE; i++) page_buf[i] = UART_RecvByte();
+                Flash_PageProgram(pos, page_buf, PAGE_SIZE);
+            }
+            Flash_Set4ByteAddr(0);
+            UART_Print("DONE\r\n");
+            break;
+        }
+
+        case 'K':  // CRC-32 (zlib's) of a flash range: checking without reading it all back
+        {
+            u32 addr = recv_u32();
+            u32 len = recv_u32();
+            Flash_Set4ByteAddr(addr >= 0x1000000 || (addr + len) > 0x1000000);
+            u32 crc = 0xFFFFFFFF;
+            for (u32 pos = addr; pos < addr + len; )
+            {
+                u32 chunk = (addr + len - pos > PAGE_SIZE) ? PAGE_SIZE : addr + len - pos;
+                Flash_Read(pos, page_buf, chunk);
+                for (u32 i = 0; i < chunk; i++)
+                {
+                    crc ^= page_buf[i];
+                    for (int k = 0; k < 8; k++) crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
+                }
+                pos += chunk;
+            }
+            Flash_Set4ByteAddr(0);
+            UART_Print("OK\r\n");
+            crc = ~crc;
+            UART_SendByte(crc); UART_SendByte(crc >> 8); UART_SendByte(crc >> 16); UART_SendByte(crc >> 24);
+            break;
+        }
+
         case 'E':  // Erase Sector
         {
             u32 addr = recv_u32();

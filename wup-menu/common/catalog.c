@@ -94,6 +94,64 @@ int catalog_download(const char *url, uint32_t size_kb, void (*progress)(int)) {
     return r;
 }
 
+/* ---- the repositories */
+static char repos[REPO_MAX][160], names[REPO_MAX][64];
+static int nrepos;
+#define REPOS_FILE "/.get/repos.txt"
+static void tidy(char *u) {                           /* no trailing slash, no repo.json */
+    size_t n = strlen(u);
+    while (n && (u[n - 1] == '/' || u[n - 1] == ' ' || u[n - 1] == '\r')) u[--n] = 0;
+    if (n > 10 && !strcmp(u + n - 10, "/repo.json")) { u[n - 10] = 0; tidy(u); }
+}
+static void name_of(int i) {
+    const char *h = strstr(repos[i], "://"); h = h ? h + 3 : repos[i];
+    size_t k = strcspn(h, "/"); if (k >= sizeof names[i]) k = sizeof names[i] - 1;
+    memcpy(names[i], h, k); names[i][k] = 0;
+}
+static void repos_save(void) {
+    char t[REPO_MAX * 162]; size_t n = 0;
+    for (int i = 1; i < nrepos; i++) n += (size_t)snprintf(t + n, sizeof t - n, "%s\n", repos[i]);
+    lfs_mkdir(&fs_lfs, "/.get");
+    if (n) fs_write(REPOS_FILE, t, (uint32_t)n); else fs_remove(REPOS_FILE);
+}
+int catalog_repos(void) {
+    if (nrepos) return nrepos;
+    snprintf(repos[0], sizeof repos[0], "%s", CATALOG_URL); tidy(repos[0]); name_of(0); nrepos = 1;
+    char t[REPO_MAX * 162]; int n = fs_read(REPOS_FILE, 0, t, sizeof t - 1);
+    if (n > 0) {
+        t[n] = 0;
+        for (char *l = strtok(t, "\n"); l && nrepos < REPO_MAX; l = strtok(0, "\n")) {
+            if (strncmp(l, "https://", 8)) continue;
+            snprintf(repos[nrepos], sizeof repos[0], "%s", l); tidy(repos[nrepos]); name_of(nrepos); nrepos++;
+        }
+    }
+    return nrepos;
+}
+const char *catalog_repo(int i) { catalog_repos(); return i >= 0 && i < nrepos ? repos[i] : repos[0]; }
+const char *catalog_repo_name(int i) { catalog_repos(); return i >= 0 && i < nrepos ? names[i] : names[0]; }
+int catalog_repo_add(const char *url) {
+    catalog_repos();
+    char u[160];
+    if (!strncmp(url, "https://", 8)) snprintf(u, sizeof u, "%s", url);
+    else if (!strstr(url, "://")) snprintf(u, sizeof u, "https://%s", url);   /* (typed without it) */
+    else return -1;                                    /* (http: the pad only fetches over HTTPS) */
+    tidy(u);
+    if (strlen(u) <= 8 || !strchr(u + 8, '.')) return -1;
+    for (int i = 0; i < nrepos; i++) if (!strcmp(repos[i], u)) return -2;
+    if (nrepos == REPO_MAX) return -3;
+    snprintf(repos[nrepos], sizeof repos[0], "%s", u); name_of(nrepos); nrepos++;
+    repos_save();
+    return 0;
+}
+void catalog_repo_remove(int i) {
+    catalog_repos();
+    if (i <= 0 || i >= nrepos) return;
+    for (int k = i; k < nrepos - 1; k++) { memcpy(repos[k], repos[k + 1], sizeof repos[0]); memcpy(names[k], names[k + 1], sizeof names[0]); }
+    nrepos--;
+    repos_save();
+}
+int catalog_repo_failed;
+
 /* ---- repo.json */
 static int is(const char *js, const jsmntok_t *t, const char *s) {
     return t->type == JSMN_STRING && (int)strlen(s) == t->end - t->start && !strncmp(js + t->start, s, (size_t)(t->end - t->start));
@@ -121,12 +179,10 @@ static void installed_version(catalog_pkg *p) {
 #ifdef CATALOG_PREVIEW
 #include "catalog_preview.h"
 #endif
-int catalog_load(void) {
-#ifdef CATALOG_PREVIEW
-    return preview_load();
-#endif
+static int load_one(int repo) {                       /* its packages appended to catalog[] */
+    char url[192]; snprintf(url, sizeof url, "%s/repo.json", catalog_repo(repo));
     buf_t b = { 0 };
-    int r = get(CATALOG_URL "/repo.json", &b);
+    int r = get(url, &b);
     if (r) return r;
     jsmn_parser jp; jsmn_init(&jp);
     int n = jsmn_parse(&jp, (const char *)b.p, b.n, NULL, 0);   /* (counted first: only the tokens needed) */
@@ -134,7 +190,7 @@ int catalog_load(void) {
     if (!t) { free(b.p); return n > 0 ? CATALOG_ENOMEM : CATALOG_EFORMAT; }
     jsmn_init(&jp); n = jsmn_parse(&jp, (const char *)b.p, b.n, t, (unsigned)n);
     const char *js = (const char *)b.p;
-    catalog_count = 0; r = CATALOG_EFORMAT;
+    r = CATALOG_EFORMAT;
     if (n > 0 && t[0].type == JSMN_OBJECT) {
         for (int i = 1; i < n; i = skip(t, i + 1)) {
             if (!is(js, &t[i], "packages") || t[i + 1].type != JSMN_ARRAY) continue;
@@ -152,6 +208,7 @@ int catalog_load(void) {
                     else if (is(js, k, "md5")) copy(p->md5, sizeof p->md5, js, v);
                     else if (is(js, k, "filesize")) p->filesize_kb = (uint32_t)atol(js + v->start);
                 }
+                p->repo = (uint8_t)repo;
                 if (p->name[0] && !strchr(p->name, '/') && strlen(p->md5) == 32) { installed_version(p); catalog_count++; }
                 a = end;
             }
@@ -160,6 +217,18 @@ int catalog_load(void) {
     }
     free(t); free(b.p);
     return r;
+}
+int catalog_load(void) {
+#ifdef CATALOG_PREVIEW
+    return preview_load();
+#endif
+    catalog_count = 0; catalog_repo_failed = 0;
+    int ok = 0, last = CATALOG_ENET;
+    for (int i = 0; i < catalog_repos(); i++) {
+        int r = load_one(i);
+        if (r) { catalog_repo_failed |= 1 << i; last = r; } else ok = 1;
+    }
+    return ok ? 0 : last;                              /* (one repository that answers is enough) */
 }
 
 int catalog_system(const catalog_pkg *p) { return !strcmp(p->category, "system"); }
@@ -181,7 +250,7 @@ const char *catalog_icon(const catalog_pkg *p) {
             if (!strncmp(info.name, p->name, k) && info.name[k] == '-') { snprintf(old, sizeof old, "/.get/icons/%s", info.name); fs_remove(old); }
         lfs_dir_close(&fs_lfs, &dir);
     }
-    snprintf(url, sizeof url, CATALOG_URL "/packages/%s/icon.png", p->name);
+    snprintf(url, sizeof url, "%s/packages/%s/icon.png", catalog_repo(p->repo), p->name);
     if (fs_stream_open(path)) return NULL;
     wup_https_opts o = opts();
     int r = wup_https_get(url, &o, icon_file, NULL);
@@ -200,7 +269,7 @@ static int to_file(void *arg, const uint8_t *d, size_t n, long long total) {
     return 0;
 }
 int catalog_fetch(const catalog_pkg *p, void (*progress)(int)) {
-    char url[192]; snprintf(url, sizeof url, CATALOG_URL "/zips/%s.zip", p->name);
+    char url[256]; snprintf(url, sizeof url, "%s/zips/%s.zip", catalog_repo(p->repo), p->name);
     if ((uint64_t)p->filesize_kb + 64 > fs_size_kb() - fs_used_kb()) return CATALOG_ESPACE;   /* (the zip, then its files) */
     int r = ready();
     if (r) return r;

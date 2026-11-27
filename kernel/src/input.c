@@ -5,7 +5,7 @@
 u8 input_report[128] __attribute__((aligned(4)));
 volatile u32 input_seq;
 
-/* The Power button (report byte 4, bit 1): the pad off, the screen first, as the stock firmware turns it off. Only
+/* The Power button (report byte 4, bit 1), held a second: the pad off, the screen first, as the stock firmware does. Only
    after it has been seen up: it may still be held from switching the pad on */
 static void input_task(void *unused) {
     (void)unused;
@@ -17,7 +17,8 @@ static void input_task(void *unused) {
                                                                does (the codec is written only when it moves) */
             int down = (input_report[4] & 0x02) != 0;
             if (!down) { armed = 1; held = 0; }
-            else if (armed && ++held == 10) power_off();      /* (40 ms down: a press, not a glitch) */
+            else if (armed && ++held == 250) power_off();     /* (held 1 s, as stock: measured in wup-emu, which
+                                                                 ignores 0.9 s and turns off at 1 s, still held) */
         }
         sched_sleep(4);
     }

@@ -71,6 +71,14 @@ int flash_erase4k(u32 addr) {
     if ((addr & 0xfff) || !flash_may_write(addr, 0x1000)) return -9;
     return erase_raw(addr);
 }
+int flash_erase64k(u32 addr) {                         /* (a 64 KB block: about 3 times a 4 KB sector's time, for 16 times as much) */
+    if ((addr & 0xffff) || !flash_may_write(addr, 0x10000)) return -9;
+    u8 b[5];
+    if (wait_ready(100000) || cmd1(0x06)) return -1;
+    put_addr(b, 0xd8, addr);
+    if (spi_xfer(CS, b, 5, NULL, 0, NULL, 0)) return -1;
+    return wait_ready(5000000);
+}
 int flash_program(u32 addr, const void *p, u32 n) {
     if (!flash_may_write(addr, n)) return -9;
     return program_raw(addr, p, n);

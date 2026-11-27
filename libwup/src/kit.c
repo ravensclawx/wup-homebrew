@@ -18,11 +18,6 @@ int kit_dark(void) { return (ui & WUP_UI_SET) && (ui & WUP_UI_DARK); }
 static lv_color_t ink(void) { return kit_dark() ? lv_color_hex(0xf2f2f2) : lv_color_hex(0x202124); }
 static lv_color_t paper(void) { return kit_dark() ? lv_color_hex(0x15171a) : lv_color_white(); }
 
-static void kit_note_sound(int notice) {             /* an alert or a notice appears (wup_alert_sound) */
-    if (ui & WUP_UI_QUIET) return;
-    if (!audio_on) audio_on = wup_audio_open() == 0;
-    if (audio_on) play_two_notes(!notice, wup_audio_queue);
-}
 void kit_click(void) {
     static uint32_t last;
     if (ui & WUP_UI_QUIET) return;
@@ -32,6 +27,7 @@ void kit_click(void) {
     if (!audio_on) audio_on = wup_audio_open() == 0;
     if (audio_on) wup_audio_queue(click, CLICK);
 }
+static void kit_note_sound(int notice) { (void)notice; kit_click(); }   /* an alert or a notice appears: the click too */
 
 /* ---- the status: Wi-Fi, charging, the battery, the time */
 static void status_text(void) {

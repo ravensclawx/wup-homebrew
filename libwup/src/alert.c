@@ -1,4 +1,5 @@
-/* wup_alert, wup_notice: see include/wup_lvgl.h. An alert over whatever is on screen: the screen dims a little, a card fades in
+/* wup_alert, wup_notice: see include/wup_lvgl.h. An alert over whatever is on screen: the screen dims a little (at once: fading the whole
+ * screen would draw all of it again every frame), a card fades in
  * (and rises a few pixels) with a title, a quieter line and one or two choices; it leaves the same way. The buttons
  * are read here, not by LVGL (the keypad is taken off what is behind while it shows): left/right choose, A takes the
  * choice, B cancels. What was chosen is acted on from wup_alert_step(), never inside an LVGL event.
@@ -12,7 +13,6 @@ static void (*on_ok)(void);
 static int two, pick, danger, closing;
 void (*wup_alert_sound)(int notice);                  /* (the menu, the kit: their sound for one appearing) */
 
-static void set_opa(void *o, int32_t v) { lv_obj_set_style_bg_opa(o, (lv_opa_t)v, 0); }
 static void set_card(void *o, int32_t v) { lv_obj_set_style_opa(o, (lv_opa_t)v, 0); lv_obj_set_style_translate_y(o, (255 - v) * 14 / 255, 0); }
 static void anim(lv_obj_t *o, lv_anim_exec_xcb_t f, int from, int to, int ms, lv_anim_completed_cb_t done) {
     lv_anim_t a; lv_anim_init(&a);
@@ -42,6 +42,7 @@ void wup_alert(const char *title, const char *message, const char *ok, const cha
     behind = lv_indev_get_group(wup_lvgl_keys()); lv_indev_set_group(wup_lvgl_keys(), nowhere);
     dim = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(dim); lv_obj_set_size(dim, LV_PCT(100), LV_PCT(100)); lv_obj_set_style_bg_color(dim, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(dim, 96, 0);               /* (38 %) */
     lv_obj_add_flag(dim, LV_OBJ_FLAG_CLICKABLE);       /* (touches stop here) */
     card = lv_obj_create(dim);                         /* the theme's card: its colours in light and dark */
     lv_obj_set_size(card, 520, LV_SIZE_CONTENT); lv_obj_center(card); lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
@@ -64,16 +65,14 @@ void wup_alert(const char *title, const char *message, const char *ok, const cha
     btn[two] = choice(row, ok ? ok : "OK");
     paint();
     if (wup_alert_sound) wup_alert_sound(0);
-    anim(dim, set_opa, 0, 96, 180, NULL);              /* (a little darker: 38 %) */
-    anim(card, set_card, 0, 255, 220, NULL);
+    anim(card, set_card, 0, 255, 180, NULL);
 }
 static void gone(lv_anim_t *a) { (void)a; if (dim) { lv_obj_delete_async(dim); dim = card = 0; } }
 static void leave(void) {
     closing = 1;
     lv_indev_set_group(wup_lvgl_keys(), behind);
-    lv_anim_delete(dim, set_opa); lv_anim_delete(card, set_card);
-    anim(card, set_card, lv_obj_get_style_opa(card, 0), 0, 130, NULL);
-    anim(dim, set_opa, lv_obj_get_style_bg_opa(dim, 0), 0, 150, gone);
+    lv_anim_delete(card, set_card);
+    anim(card, set_card, lv_obj_get_style_opa(card, 0), 0, 120, gone);   /* (then the dim goes with it, at once) */
 }
 int wup_alert_shown(void) { return dim != 0; }
 int wup_alert_step(unsigned pressed) {

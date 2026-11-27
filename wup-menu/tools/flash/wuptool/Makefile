@@ -55,7 +55,7 @@ endif
 # SOURCES is a list of directories containing source code
 # INCLUDES is a list of directories containing extra header files
 #---------------------------------------------------------------------------------
-SOURCEDIRS	:= ${shell find source -type d -print}
+SOURCEDIRS	:= ${shell find source -type d -not -name compat -print}
 
 TARGET		:=	$(shell basename $(CURDIR))
 BUILD		:=	build
@@ -73,7 +73,8 @@ CFLAGS	:=	-Wall -O2\
 			-nostdlib -nostartfiles -ffreestanding \
 			$(ARCH)
 
-CFLAGS	+=	$(INCLUDE) -DARM9
+export COMPAT	?=	$(CURDIR)/source/compat	# (stdlib.h and string.h stand-ins)
+CFLAGS	+=	$(INCLUDE) -isystem $(COMPAT) -DARM9
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions
 
 ASFLAGS	:=	$(ARCH)

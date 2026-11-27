@@ -19,6 +19,7 @@
 #define WUP_SYMBOL_TERMINAL  "\xEF\x84\xA0"     /* f120 a terminal prompt */
 #define WUP_SYMBOL_CHIP      "\xEF\x8B\x9B"     /* f2db a microchip */
 #define WUP_SYMBOL_DRIVE     "\xEF\x82\xA0"     /* f0a0 a drive */
+#define WUP_SYMBOL_GLOBE     "\xEF\x82\xAC"     /* f0ac a globe (a web address) */
 
 lv_display_t *wup_lvgl_init(void);
 void wup_lvgl_run(int ms);                 /* draw and handle input for about ms milliseconds (the system runs too) */

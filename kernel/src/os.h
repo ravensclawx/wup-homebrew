@@ -147,6 +147,7 @@ void flash_done(void);
 int flash_read(u32 addr, void *p, u32 n);
 int flash_may_write(u32 addr, u32 n);
 int flash_erase4k(u32 addr);
+int flash_erase64k(u32 addr);
 int flash_program(u32 addr, const void *p, u32 n);
 
 /* uic.c: the UIC (buttons, sticks, touch, battery, power), over SPI */

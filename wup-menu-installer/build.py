@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Homebrew Menu Installer: the payload from wup-menu (its tools/mkinstaller.py: the boot hook, the loader and
+"""Build the Homebrew Menu Installer: the payload from wup-menu (its tools/mkinstaller.py: the early hook, the kernel and
 the Homebrew Menu, all from that checkout), then the app with devkitPro's wut in Docker (Dockerfile, the image DRXUtil
 builds with) -> homebrew_menu_installer.wuhb
 

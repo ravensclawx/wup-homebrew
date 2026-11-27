@@ -4,8 +4,8 @@
  *
  * Nothing of Nintendo's firmware has run yet: stage 2 has set the clocks and done the UIC handshake, the MMU and the
  * caches are off. If A is held (the UIC's input report, read here over SPI) or the menu's Autoboot is on (its settings,
- * flash 0xB0000/0xB1000), the kernel is read from its
- * slot (flash 0xB2000: header {"GPST", size, crc32}, the image from 0xB3000, linked at RAM 0x10000), checked, and
+ * flash 0xB0000/0xB1000), the kernel is read from a Wii U install's bundle in the bank that runs, if there is one, else
+ * from its slot (flash 0xB2000: header {"GPST", size, crc32}, the image from 0xB3000, linked at RAM 0x10000), checked, and
  * started with r0 = "HOOK" (the flash then in 4-byte address mode): every chip as cold as after power-on, the start its drivers are proven from. In every
  * other case (no X, no valid kernel, anything unexpected) this returns, the displaced instruction runs, and Nintendo's
  * firmware starts exactly as it would have (stock).
@@ -21,6 +21,10 @@ typedef unsigned int u32; typedef unsigned char u8;
 #define SYS_END  0x000d2000u
 #define SYS_RAM  0x00010000u
 #define KMENU_HDR 0x00010000u                       /* the kernel's menu (kernel/src/app.c) */
+#define SELECTOR 0x0000f000u                        /* the bank stage 2 started: 1 = Product2, else Product1 */
+#define BUNDLE   0x002c9000u                        /* a Wii U install's bundle, in that bank (wup-menu-installer):
+                                                       the kernel's slot at +0, the menu's at +KB_MENU */
+#define KB_MENU  0x00020000u
 #define SYS_MAGIC 0x54535047u                       /* "GPST" */
 #define HOOK_ARG 0x4b4f4f48u                        /* "HOOK" */
 #define BUF      0x00341000u                        /* (where the loader runs later: free memory to Nintendo's firmware,
@@ -95,7 +99,7 @@ FAR static int flash(u32 addr, u32 to, u32 n) {         /* (4-byte addresses: ea
     }
     return 0;
 }
-FAR static u32 crc32(u32 c, const u8 *p, u32 n) {   /* (c: ~0 to start, the running value after; ~ at the end) */
+static u32 crc32(u32 c, const u8 *p, u32 n) {   /* (c: ~0 to start, the running value after; ~ at the end) */
     while (n--) { c ^= *p++; for (int k = 0; k < 8; k++) c = c & 1 ? (c >> 1) ^ 0xedb88320u : c >> 1; }
     return c;
 }
@@ -129,22 +133,29 @@ int early_main(void) {
 /* the X path, in the second area (FAR) */
 static const u8 fcmd[4] = { 0x06, 0xb7, 0x06, 0xe9 };  /* write enable + enter / exit 4-byte addresses */
 FAR static void addr4(int on) { xfer(FL_CS, &fcmd[on ? 0 : 2], 1, 0, 0); xfer(FL_CS, &fcmd[on ? 1 : 3], 1, 0, 0); }
-/* 1: the kernel whole, checked through BUF first (nothing of Nintendo's in RAM touched), then copied to SYS_RAM */
-FAR static int kernel_whole(void) {
+/* 1: a menu and a whole kernel at mhdr / khdr (the kernel's image a sector after its header), checked through BUF first
+   (nothing of Nintendo's in RAM touched), then the kernel copied to SYS_RAM */
+FAR static int whole_at(u32 mhdr, u32 khdr) {
     const u32 *h = (const u32 *)BUF;
-    if (flash(KMENU_HDR, BUF, 8) || h[0] != 0x554e4d57u || h[1] < 64) return 0;   /* its menu there ("WMNU"; written last,
-                                                       after a write checked read back: whole), or stock */
-    if (flash(SYS_HDR, BUF, 16) || h[0] != SYS_MAGIC || h[1] < 0x100 || h[1] > SYS_END - SYS_IMG) return 0;
-    u32 size = h[1], want = h[2], c = ~0u;
+    if (flash(mhdr, BUF, 8) || h[0] != 0x554e4d57u || h[1] < 64) return 0;   /* a menu there ("WMNU"; written last,
+                                                       after a write checked read back: whole) */
+    if (flash(khdr, BUF, 16) || h[0] != SYS_MAGIC || h[1] < 0x100 || h[1] > SYS_END - SYS_IMG) return 0;
+    u32 size = h[1], want = h[2], c = ~0u, img = khdr + 0x1000;
     for (u32 o = 0; o < size; o += 4096) {
         u32 k = size - o < 4096 ? size - o : 4096;
-        if (flash(SYS_IMG + o, BUF, k)) return 0;
+        if (flash(img + o, BUF, k)) return 0;
         c = crc32(c, (const u8 *)BUF, k);
     }
     if (~c != want) return 0;
-    if (flash(SYS_IMG, SYS_RAM, size)) for (;;) ;    /* (Nintendo's start already overwritten: power off and on.
+    if (flash(img, SYS_RAM, size)) for (;;) ;        /* (Nintendo's start already overwritten: power off and on.
                                                        A read that worked just before fails only if the pad is failing) */
     return 1;
+}
+/* a Wii U install's bundle first (its kernel puts both into their slots, then removes the bundle), then the slots */
+FAR static int kernel_whole(void) {
+    if (flash(SELECTOR, BUF, 4)) return 0;
+    u32 b = (*(const u8 *)BUF == 1 ? 0x00500000u : 0x00100000u) + BUNDLE;
+    return whole_at(b + KB_MENU, b) || whole_at(KMENU_HDR, SYS_HDR);
 }
 /* the menu's Autoboot: the valid record with the higher sequence (config.c: {magic "WCFG", version 1, seq, len 76, crc32},
    then config_t: light, autoboot, ...) */

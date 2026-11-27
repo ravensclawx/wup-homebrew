@@ -7,9 +7,10 @@
  *   0x5000  the data: the sections (INDX, VER_, LVC_, WIFI, ERR_, UMI_, IMG_), as they lie in the pad's firmware bank
  * (the layout as DRXUtil reads and writes it: github.com/GaryOderNichts/DRXUtil, source/Firmware.cpp).
  *
- * The change, the same as the UART install's in Product1 (wup-menu: tools/mkflash.py): one `bl` in LVC_ redirected to the hook,
- * the hook over unused strings, and the bundle (the loader and the menu) after the last section at BUNDLE_OFF, where
- * the hook and the loader look in the bank that runs (boot/hook.S). Nothing else changes; the version stays. */
+ * The change, the same as the UART install's in Product1 (wup-menu: tools/mkflash.py): the early hook's two pieces over
+ * unused strings in LVC_ and the branch to it at LVC_ 0x40, and the bundle (the kernel and the menu, as their slots
+ * store them) after the last section at BUNDLE_OFF, where the early hook looks in the bank that runs (boot/early.c).
+ * Nothing else changes; the version stays. */
 #include <stdlib.h>
 #include <string.h>
 #include "fwpatch.h"
@@ -20,10 +21,11 @@
 #define DATA (FWHDR + SUBCRC)
 #define BLOCK 0x1000u
 
-/* the payload (wup-menu: tools/mkinstaller.py), little-endian */
-enum { P_MAGIC, P_VERSION, P_FWVER, P_LVC_SIZE, P_LVC_CRC, P_HOOK_SITE, P_STUB_ADDR, P_STUB_MAX, P_BUNDLE_OFF,
-       P_STUB_LEN, P_BUNDLE_LEN, P_BL, P_COUNT };
+/* the payload (wup-menu: tools/mkinstaller.py), little-endian: a head, {offset in LVC_, length} per patch, the
+   patches' bytes, the bundle */
+enum { P_MAGIC, P_VERSION, P_FWVER, P_LVC_SIZE, P_LVC_CRC, P_BUNDLE_OFF, P_NPATCH, P_BUNDLE_LEN, P_COUNT };
 #define PAYLOAD_MAGIC 0x49505557u   /* "WUPI" */
+#define NPATCH_MAX 8
 
 static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
@@ -38,13 +40,22 @@ uint32_t fwpatch_crc32(const uint8_t *p, size_t n) {
     return ~c;
 }
 
-typedef struct { uint32_t v[P_COUNT]; const uint8_t *stub, *bundle; } payload_t;
+typedef struct { uint32_t v[P_COUNT], at[NPATCH_MAX], len[NPATCH_MAX]; const uint8_t *data[NPATCH_MAX], *bundle; } payload_t;
 static int read_payload(const uint8_t *p, size_t n, payload_t *pl, const char **err) {
-    if (n < 4 * P_COUNT) { *err = "Damaged installer"; return -1; }
+    *err = "Damaged installer";
+    if (n < 4 * P_COUNT) return -1;
     for (int i = 0; i < P_COUNT; i++) pl->v[i] = le32(p + 4 * i);
-    if (pl->v[P_MAGIC] != PAYLOAD_MAGIC || pl->v[P_VERSION] != 1) { *err = "Damaged installer"; return -1; }
-    if ((uint64_t)4 * P_COUNT + pl->v[P_STUB_LEN] + pl->v[P_BUNDLE_LEN] != n || pl->v[P_STUB_LEN] > pl->v[P_STUB_MAX]) { *err = "Damaged installer"; return -1; }
-    pl->stub = p + 4 * P_COUNT; pl->bundle = pl->stub + pl->v[P_STUB_LEN];
+    uint32_t np = pl->v[P_NPATCH];
+    if (pl->v[P_MAGIC] != PAYLOAD_MAGIC || pl->v[P_VERSION] != 2 || np > NPATCH_MAX || n < 4 * P_COUNT + 8 * np) return -1;
+    const uint8_t *d = p + 4 * P_COUNT + 8 * np;
+    uint64_t total = 4 * P_COUNT + 8 * np;
+    for (uint32_t i = 0; i < np; i++) {
+        pl->at[i] = le32(p + 4 * P_COUNT + 8 * i); pl->len[i] = le32(p + 4 * P_COUNT + 8 * i + 4);
+        if ((uint64_t)pl->at[i] + pl->len[i] > pl->v[P_LVC_SIZE]) return -1;
+        pl->data[i] = d; d += pl->len[i]; total += pl->len[i];
+    }
+    if (total + pl->v[P_BUNDLE_LEN] != n) return -1;
+    pl->bundle = d;
     return 0;
 }
 
@@ -102,9 +113,7 @@ int fwpatch(const uint8_t *orig, size_t orig_len, const uint8_t *payload, size_t
     memcpy(d, orig + HDR + DATA, dlen);
     memset(d + dlen, 0xff, pl.v[P_BUNDLE_OFF] - dlen);     /* (erased flash) */
     memcpy(d + pl.v[P_BUNDLE_OFF], pl.bundle, pl.v[P_BUNDLE_LEN]);
-    memset(d + lvc + pl.v[P_STUB_ADDR], 0, pl.v[P_STUB_MAX]);
-    memcpy(d + lvc + pl.v[P_STUB_ADDR], pl.stub, pl.v[P_STUB_LEN]);
-    put_le32(d + lvc + pl.v[P_HOOK_SITE], pl.v[P_BL]);
+    for (uint32_t i = 0; i < pl.v[P_NPATCH]; i++) memcpy(d + lvc + pl.at[i], pl.data[i], pl.len[i]);
     memset(sub, 0, SUBCRC);
     for (size_t i = 0, k = 0; i < nlen; i += BLOCK, k++)
         put_le32(sub + 4 * k, fwpatch_crc32(d + i, nlen - i < BLOCK ? nlen - i : BLOCK));

@@ -118,7 +118,9 @@ def find_serial_port():
     patterns = [
         '/dev/ttyUSB*',
         '/dev/ttyACM*',
+        '/dev/cu.usbserial*',          # (macOS: cu, not tty, which waits for a carrier signal)
         '/dev/tty.usbserial*',
+        '/dev/cu.usbmodem*',
         '/dev/tty.usbmodem*',
     ]
 
@@ -176,9 +178,6 @@ class WUPTool:
         with open(payload_path, 'rb') as f:
             payload = f.read()
 
-        print("\n" + "=" * 50)
-        print("   >>> POWER CYCLE THE GAMEPAD NOW <<<")
-        print("=" * 50 + "\n")
 
         time.sleep(1)
         self.ser.reset_input_buffer()

@@ -11,6 +11,53 @@
 #define MENU_HDR   0x00010000u              /* the menu's slot (wup-menu/tools/mkflash.py) */
 #define MENU_END   0x000b0000u
 #define WMNU       0x554e4d57u
+#define KERN_HDR   0x000b2000u              /* the kernel's slot (wup-menu/boot/early.c) */
+#define KERN_END   0x000d2000u
+#define GPST       0x54535047u
+#define BUNDLE     0x002c9000u              /* a Wii U install's bundle in the bank that runs (wup-menu/boot/early.c) */
+#define KB_MENU    0x00020000u
+
+/* A Wii U install (wup-menu-installer) can only write a firmware bank: it brings the kernel and the menu as a bundle
+   in it, which the early hook starts from. Here, on that first start, both go into their slots, each header last and
+   checked; then the bundle's menu header is erased, and from then on the pad is as one installed over UART (Software
+   Update, the early hook: the slots). Cut short, it is all done again at the next start. About ten seconds, once. */
+static u8 sec[0x1000] __attribute__((aligned(4)));
+static int slot_crc(u32 img, u32 size, u32 *crc) {
+    u32 c = ~0u;
+    for (u32 o = 0; o < size; o += sizeof sec) {
+        u32 k = size - o < sizeof sec ? size - o : sizeof sec;
+        if (flash_read(img + o, sec, k)) return -1;
+        for (u32 i = 0; i < k; i++) { c ^= sec[i]; for (int b = 0; b < 8; b++) c = c & 1 ? (c >> 1) ^ 0xedb88320u : c >> 1; }
+    }
+    *crc = ~c; return 0;
+}
+static int copy_slot(u32 from, u32 to, u32 size, int blocks) {   /* header sector + size bytes of image; blocks: 64 KB erases */
+    u32 n = 0x1000 + size;
+    if (blocks) { for (u32 o = 0; o < n; o += 0x10000) if (flash_erase64k(to + o)) return -1; }
+    else for (u32 o = 0; o < n; o += 0x1000) if (flash_erase4k(to + o)) return -1;
+    for (u32 o = 0x1000; o < n; o += sizeof sec) {
+        u32 k = n - o < sizeof sec ? n - o : sizeof sec;
+        if (flash_read(from + o, sec, k) || flash_program(to + o, sec, k)) return -1;
+    }
+    return 0;
+}
+static void bundle_apply(void) {
+    u8 sel; u32 kh[4], mh[5];
+    if (flash_read(0xf000u, &sel, 1)) return;
+    u32 b = (sel == 1 ? 0x00500000u : 0x00100000u) + BUNDLE;
+    if (flash_read(b, kh, sizeof kh) || flash_read(b + KB_MENU, mh, sizeof mh)) return;
+    if (kh[0] != GPST || kh[1] < 0x100 || kh[1] > KERN_END - KERN_HDR - 0x1000) return;
+    if (mh[0] != WMNU || mh[1] < 64 || mh[1] > MENU_END - MENU_HDR - 0x1000) return;
+    u32 c;
+    if (slot_crc(b + 0x1000, kh[1], &c) || c != kh[2] || slot_crc(b + KB_MENU + 0x1000, mh[1], &c) || c != mh[2]) { klog("bundle: damaged\n"); return; }
+    klog("bundle: a Wii U install: into the slots\n");
+    if (copy_slot(b, KERN_HDR, kh[1], 0) || slot_crc(KERN_HDR + 0x1000, kh[1], &c) || c != kh[2]
+        || flash_read(b, sec, 0x1000) || flash_program(KERN_HDR, sec, 0x1000)) { klog("bundle: kernel slot failed\n"); return; }
+    if (copy_slot(b + KB_MENU, MENU_HDR, mh[1], 1) || slot_crc(MENU_HDR + 0x1000, mh[1], &c) || c != mh[2]
+        || flash_read(b + KB_MENU, sec, 0x1000) || flash_program(MENU_HDR, sec, 0x1000)) { klog("bundle: menu slot failed\n"); return; }
+    if (flash_erase4k(b + KB_MENU)) { klog("bundle: could not remove it\n"); return; }   /* (the hook no longer takes it) */
+    klog("bundle: done\n");
+}
 
 typedef struct { u32 hdr, end; u32 h[5]; } menu_at;
 static int menu_header(menu_at *m) {
@@ -64,6 +111,7 @@ void apps_run(void *unused) {
     volatile wup_handoff_t *pb = WUP_HANDOFF;
     memset((void *)pb, 0, sizeof *pb);
     pb->magic = WUP_HANDOFF_MAGIC; pb->version = 2;
+    bundle_apply();
     for (int staged = 0;;) {
         if (!staged && !stage_menu(pb)) break;
         int menu = !staged;

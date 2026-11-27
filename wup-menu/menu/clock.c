@@ -80,6 +80,6 @@ int clock_text(char *out, int n, int long_form) {
     int h = tm.tm_hour;
     if (!cfg.h24) { h %= 12; if (!h) h = 12; }
     char hm[12]; snprintf(hm, sizeof hm, cfg.h24 ? "%02d:%02d" : "%d:%02d", h, tm.tm_min);
-    if (!long_form) return snprintf(out, (size_t)n, "%s", hm);
+    if (!long_form) return snprintf(out, (size_t)n, "%s%s", hm, cfg.h24 ? "" : tm.tm_hour < 12 ? " AM" : " PM");
     return snprintf(out, (size_t)n, "%s, %s %d, %s%s", day[tm.tm_wday], mon[tm.tm_mon], tm.tm_mday, hm, cfg.h24 ? "" : tm.tm_hour < 12 ? " AM" : " PM");
 }

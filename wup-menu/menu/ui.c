@@ -82,8 +82,17 @@ static void hint_bar(lv_obj_t *scr, const char *hints) {
         lv_obj_remove_style_all(badge);
         lv_obj_set_size(badge, HUD, HUD); lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_color(badge, ink, 0); lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-        lv_obj_t *k = lv_label_create(badge);
-        lv_label_set_text(k, key); lv_obj_set_style_text_font(k, &inter_hud, 0); lv_obj_set_style_text_color(k, paper, 0); lv_obj_align(k, LV_ALIGN_CENTER, 0, 0);
+        if (key[0] == '+' || key[0] == '-') {        /* (drawn, not a glyph: the font's sit low, and small) */
+            for (int v = 0; v < (key[0] == '+' ? 2 : 1); v++) {
+                lv_obj_t *r = lv_obj_create(badge);
+                lv_obj_remove_style_all(r);
+                lv_obj_set_size(r, v ? 2 : 10, v ? 10 : 2); lv_obj_set_style_radius(r, 1, 0);
+                lv_obj_set_style_bg_color(r, paper, 0); lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0); lv_obj_center(r);
+            }
+        } else {
+            lv_obj_t *k = lv_label_create(badge);
+            lv_label_set_text(k, key); lv_obj_set_style_text_font(k, &inter_hud, 0); lv_obj_set_style_text_color(k, paper, 0); lv_obj_align(k, LV_ALIGN_CENTER, 0, 0);
+        }
         lv_obj_t *t = lv_label_create(bar);
         lv_label_set_text(t, what); lv_obj_set_style_text_font(t, &inter_16, 0); lv_obj_set_style_text_opa(t, LV_OPA_70, 0);
         lv_obj_set_style_pad_right(t, 16, 0);
@@ -154,7 +163,7 @@ static void apply_theme(void) {
 }
 
 /* ---- a keyboard: a Wi-Fi password, a hidden network's name, the file sharing password */
-static char kb_title[64], kb_text[64];
+static char kb_title[64], kb_text[160];
 static const char *kb_hint = "Password"; static int kb_min = 8, kb_max = 63, kb_or_empty;
 static void (*kb_done)(void);
 static void kb_event(lv_event_t *e) {
@@ -547,6 +556,9 @@ static void upd_say(lv_obj_t *scr, const char *hints, const char *title, const c
 static void update_screen(lv_obj_t *scr) {
     switch (upd_state) {
     case UPD_CHECKING:
+#ifndef MENU_PREVIEW
+        if (!M.ip[0]) { upd_say(scr, "B Back", "Wi-Fi Not Connected", "Join a network in Settings"); break; }
+#endif
         busy(page(scr, "Software Update", ""), "Checking for Updates\xE2\x80\xA6", "", NULL, NULL);
         defer(upd_check);
         break;
@@ -555,7 +567,7 @@ static void update_screen(lv_obj_t *scr) {
     case UPD_INSTALLING: {
         lv_obj_t *l = page(scr, "Software Update", "");
         busy(l, "Installing\xE2\x80\xA6", "Don't turn off the GamePad", &upd_sub, &upd_spin);
-        upd_bar = lv_bar_create(l); lv_obj_set_size(upd_bar, 360, 8); lv_bar_set_range(upd_bar, 0, 100);
+        upd_bar = lv_bar_create(l); lv_obj_set_size(upd_bar, 360, 8); lv_bar_set_range(upd_bar, 0, 100); lv_obj_set_style_margin_top(upd_bar, 14, 0);
         break;
     }
     case UPD_DONE: upd_say(scr, "", "Update Complete", "The GamePad will now turn off"); defer(upd_off); break;
@@ -576,8 +588,9 @@ static void reset_screen(lv_obj_t *scr) {
    symbol, a line saying what is happening, a smaller one below it, and the bar while an app arrives. */
 static lv_obj_t *nl_icon, *nl_title, *nl_sub, *nl_bar;
 static int nl_state;
-static void nl_show(const char *symbol, const char *title, const char *sub, int bar) {
-    lv_label_set_text(nl_icon, symbol); lv_label_set_text(nl_title, title); lv_label_set_text(nl_sub, sub);
+static void nl_show(int spin, const char *title, const char *sub, int bar) {   /* spin: waiting or receiving */
+    if (spin) lv_obj_remove_flag(nl_icon, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(nl_icon, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(nl_title, title); lv_label_set_text(nl_sub, sub);
     if (bar) lv_obj_remove_flag(nl_bar, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(nl_bar, LV_OBJ_FLAG_HIDDEN);
     if (sub[0]) lv_obj_remove_flag(nl_sub, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(nl_sub, LV_OBJ_FLAG_HIDDEN);
 }
@@ -585,24 +598,19 @@ static void nl_waiting(void) {
 #ifdef MENU_PREVIEW
     strcpy(M.ip, "192.168.4.104");
 #endif
-    nl_show(LV_SYMBOL_DOWNLOAD, "Ready to Receive", M.ip, 0);
+    nl_show(1, "Ready to Receive", M.ip, 0);
 #ifdef MENU_PREVIEW_RX                             /* (a picture of an app arriving) */
-    nl_show(LV_SYMBOL_DOWNLOAD, "Hello World", "", 1); lv_bar_set_value(nl_bar, 62, LV_ANIM_OFF);
+    nl_show(1, "Receiving\xE2\x80\xA6", "", 1); lv_bar_set_value(nl_bar, 62, LV_ANIM_OFF);
 #endif
 }
 static void netloader_screen(lv_obj_t *scr) {
     lv_obj_t *l = page(scr, "Netloader", "B Back");
-    lv_obj_set_flex_align(l, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(l, 10, 0);
-    nl_icon = lv_label_create(l); lv_obj_set_style_text_font(nl_icon, &inter_32, 0); lv_obj_set_style_text_opa(nl_icon, LV_OPA_50, 0);
-    lv_obj_set_style_pad_bottom(nl_icon, 14, 0);
-    nl_title = lv_label_create(l); lv_obj_set_style_text_font(nl_title, &inter_24, 0);
-    nl_sub = lv_label_create(l); lv_obj_set_style_text_opa(nl_sub, LV_OPA_60, 0);
+    nl_title = busy(l, "", "", &nl_sub, &nl_icon);    /* (as Wi-Fi's search: the spinner, a title, a line) */
     nl_bar = lv_bar_create(l); lv_obj_set_size(nl_bar, 360, 8); lv_obj_set_style_margin_top(nl_bar, 14, 0);
     nl_state = -1;
 #ifndef MENU_PREVIEW
-    if (!M.ip[0]) { nl_show(LV_SYMBOL_WIFI, "Wi-Fi Not Connected", "Join a network in Settings", 0); return; }
-    if (wuplink_open()) { nl_show(LV_SYMBOL_WARNING, "Netloader Not Available", "", 0); return; }
+    if (!M.ip[0]) { nl_show(0, "Wi-Fi Not Connected", "Join a network in Settings", 0); return; }
+    if (wuplink_open()) { nl_show(0, "Netloader Not Available", "", 0); return; }
 #endif
     nl_waiting();
 }
@@ -616,7 +624,7 @@ static void netloader_step(void) {
     const wup_status_t *s = wuplink_status();
     if (!nl_title || s->state == WUP_OFF) return;
     if (s->state == WUP_RECEIVING) {
-        if (nl_state != WUP_RECEIVING) nl_show(LV_SYMBOL_DOWNLOAD, s->name[0] ? s->name : "Receiving\xE2\x80\xA6", "", 1);
+        if (nl_state != WUP_RECEIVING) nl_show(1, "Receiving\xE2\x80\xA6", "", 1);
         lv_bar_set_value(nl_bar, s->total ? (int32_t)((uint64_t)s->done * 100 / s->total) : 0, LV_ANIM_OFF);
     } else if (s->state == WUP_READY && nl_state != WUP_READY) defer(nl_finish);
     else if (s->state == WUP_ERROR) { nl_failed(s->error ? s->error : "The transfer stopped"); return; }
@@ -624,18 +632,137 @@ static void netloader_step(void) {
     nl_state = s->state;
 }
 
+/* ---- App Store: the apps of every repository (common/catalog.c), opened with + at home: a list, each opening the
+   app's page (Install, Update, Remove; developer, version, repository). Y: Repositories,
+   the project's own and the person's (added by address) */
+static int st_loaded, st_err, st_pick, st_working, st_removing, st_act_err;
+static char st_icons[CATALOG_MAX][96];
+static lv_obj_t *st_bar;
+static void st_idle(void) { wup_lvgl_run(0); menu_poll(); }
+static void st_progress(int pct) { if (st_bar) lv_bar_set_value(st_bar, pct, LV_ANIM_OFF); }
+static int st_has_update(const catalog_pkg *p) { return p->installed[0] && version_newer(p->version, p->installed); }
+static void st_load(void) {
+    catalog_idle = st_idle;
+    st_err = catalog_load();
+    for (int i = 0; !st_err && i < catalog_count; i++) {
+        const char *ic = catalog_system(&catalog[i]) ? NULL : catalog_icon(&catalog[i]);
+        snprintf(st_icons[i], sizeof st_icons[i], "%s", ic ? ic : "");
+    }
+    st_loaded = 1; show();
+}
+static void st_act(void) {
+    catalog_idle = st_idle;
+    catalog_pkg *p = &catalog[st_pick];
+    st_act_err = st_removing ? catalog_remove(p) : catalog_install(p, st_progress);
+    st_bar = 0; st_working = 0;
+    if (!st_act_err) {
+        if (st_removing) p->installed[0] = 0; else snprintf(p->installed, sizeof p->installed, "%s", p->version);
+        apps_scan();                                   /* (home shows it at once) */
+        show();
+        char t[80]; snprintf(t, sizeof t, st_removing ? "\"%s\" Removed" : "\"%s\" Installed", p->title);
+        wup_notice(t, 1);
+        return;
+    }
+    show();
+    wup_alert(st_removing ? "Couldn't Remove" : "Couldn't Install", catalog_why(st_act_err), "OK", NULL, NULL, 0);
+}
+static void st_start(int remove) { st_removing = remove; st_working = 1; show(); defer(st_act); }
+static void on_st_install(lv_event_t *e) { (void)e; st_start(0); }
+static void st_remove_go(void) { st_start(1); }
+static void on_st_remove(lv_event_t *e) {
+    (void)e; char t[80]; snprintf(t, sizeof t, "Remove \"%s\"", catalog[st_pick].title);
+    wup_alert(t, "The app and its files are removed from the GamePad.", "Remove", "Cancel", st_remove_go, 1);
+}
+static void st_app_screen(lv_obj_t *scr) {
+    catalog_pkg *p = &catalog[st_pick];
+    if (st_working) {                                  /* (as the other waits: the spinner, a title, the bar) */
+        lv_obj_t *w = page(scr, "App Store", "");
+        busy(w, st_removing ? "Removing\xE2\x80\xA6" : "Installing\xE2\x80\xA6", "", NULL, NULL);
+        if (!st_removing) { st_bar = lv_bar_create(w); lv_obj_set_size(st_bar, 360, 8); lv_bar_set_range(st_bar, 0, 100); lv_obj_set_style_margin_top(st_bar, 14, 0); }
+        return;
+    }
+    char t[24];
+    lv_obj_t *l = page(scr, p->title, "B Back    A Select");
+    if (!p->installed[0]) {
+        if (p->filesize_kb >= 1024) snprintf(t, sizeof t, "%u.%u MB", p->filesize_kb / 1024, (p->filesize_kb % 1024) * 10 / 1024);
+        else snprintf(t, sizeof t, "%u KB", p->filesize_kb);
+        row(l, LV_SYMBOL_DOWNLOAD, "Install", t, on_st_install, NULL);
+    } else if (st_has_update(p)) row(l, LV_SYMBOL_DOWNLOAD, "Update", p->version, on_st_install, NULL);
+    if (p->installed[0]) row(l, LV_SYMBOL_TRASH, "Remove", NULL, on_st_remove, NULL);
+    row(l, NULL, "Version", p->installed[0] ? p->installed : p->version, on_nothing, NULL);
+    row(l, NULL, "Developer", p->author[0] ? p->author : "\xE2\x80\x94", on_nothing, NULL);
+    row(l, NULL, "Repository", catalog_repo_name(p->repo), on_nothing, NULL);
+}
+static void on_st_app(lv_event_t *e) { st_pick = (int)(intptr_t)lv_event_get_user_data(e); st_working = 0; push(st_app_screen); }
+
+static int repo_pick;
+static void repo_remove_go(void) { catalog_repo_remove(repo_pick); st_loaded = 0; show(); }
+static void on_repo(lv_event_t *e) {
+    repo_pick = (int)(intptr_t)lv_event_get_user_data(e);
+    if (repo_pick == 0) return;                        /* (the project's own stays) */
+    char t[96]; snprintf(t, sizeof t, "Remove \"%s\"", catalog_repo_name(repo_pick));
+    wup_alert(t, "Its apps no longer show in the App Store. Apps already installed stay.", "Remove", "Cancel", repo_remove_go, 1);
+}
+static void repo_add_done(void) {
+    int r = catalog_repo_add(kb_text);
+    memset(kb_text, 0, sizeof kb_text);
+    pop();
+    if (r == 0) { st_loaded = 0; wup_notice("Repository Added", 1); }
+    else wup_alert("Couldn't Add the Repository", r == -2 ? "It's in the list already." : r == -3 ? "There can be 8 repositories at most."
+                   : "Enter its https:// address.", "OK", NULL, NULL, 0);
+}
+static void on_repo_add(lv_event_t *e) { (void)e; ask_text("Enter the repository's address", "https://", 4, 150, 0, repo_add_done); }
+static void repos_screen(lv_obj_t *scr) {
+    lv_obj_t *l = page(scr, "Repositories", "B Back    A Select");
+    for (int i = 0; i < catalog_repos(); i++)
+        row(l, WUP_SYMBOL_GLOBE, catalog_repo_name(i), i == 0 ? "Built In" : (catalog_repo_failed >> i & 1) ? "Not Reachable" : NULL, on_repo, (void *)(intptr_t)i);
+    row(l, LV_SYMBOL_PLUS, "Add Repository\xE2\x80\xA6", NULL, on_repo_add, NULL);
+    note(l, "Apps from these repositories appear in the App Store.");
+}
+static void store_screen(lv_obj_t *scr) {
+#ifndef MENU_PREVIEW
+    if (!M.ip[0]) {                                    /* (no network: nothing to wait for) */
+        lv_obj_t *s1, *sp; busy(page(scr, "App Store", "B Back"), "Wi-Fi Not Connected", "Join a network in Settings", &s1, &sp);
+        lv_obj_add_flag(sp, LV_OBJ_FLAG_HIDDEN); return;
+    }
+#endif
+    if (!st_loaded) { busy(page(scr, "App Store", ""), "Loading\xE2\x80\xA6", "", NULL, NULL); defer(st_load); return; }
+    int n = 0;
+    for (int i = 0; !st_err && i < catalog_count; i++) n += !catalog_system(&catalog[i]);
+    lv_obj_t *l = page(scr, "App Store", n ? "Y Repositories    B Back    A Open" : "Y Repositories    B Back");
+    if (st_err || !n) {
+        lv_obj_t *s1, *sp;
+        busy(l, st_err ? "Can't Load Apps" : "No Apps", st_err ? catalog_why(st_err) : "Add a repository with Y", &s1, &sp);
+        lv_obj_add_flag(sp, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    for (int i = 0; i < catalog_count; i++) {
+        const catalog_pkg *p = &catalog[i];
+        if (catalog_system(p)) continue;
+        char t[200];
+        if (p->description[0]) snprintf(t, sizeof t, "%s\n%s", p->title, p->description); else snprintf(t, sizeof t, "%s", p->title);
+        lv_obj_t *b = row(l, st_icons[i][0] ? st_icons[i] : LV_SYMBOL_FILE, t, st_has_update(p) ? "Update" : p->installed[0] ? "Installed" : NULL, on_st_app, (void *)(intptr_t)i);
+        if (st_icons[i][0]) {                          /* (on white, as an app's icon is at home: wupack fills it in) */
+            lv_obj_t *im = lv_obj_get_child(b, 0);
+            lv_obj_set_size(im, WUP_ICON, WUP_ICON); lv_image_set_inner_align(im, LV_IMAGE_ALIGN_CENTER);
+            lv_obj_set_style_bg_color(im, lv_color_white(), 0); lv_obj_set_style_bg_opa(im, LV_OPA_COVER, 0);
+        }
+    }
+}
+static void store_open(void) { st_loaded = 0; push(store_screen); }
+
 /* ---- home: the installed apps */
 #define ICONS 12                                   /* icons kept in memory (8 KB each); apps after that show without */
 static lv_image_dsc_t icon[ICONS];
 static void on_app(lv_event_t *e) {
     home_sel = (int)(intptr_t)lv_event_get_user_data(e);
     const char *err = menu_start(apps_list[home_sel].path);
-    if (!err) { sound_launch(); for (int t = 0; t < 260; t += 10) wup_lvgl_run(10); }      /* (heard before the menu goes) */
+    if (!err) for (int t = 0; t < 30; t += 10) wup_lvgl_run(10);      /* (the click heard before the menu goes) */
     if (err) { static char t[64]; snprintf(t, sizeof t, "\"%s\" Can't Be Opened", apps_list[home_sel].name); wup_alert(t, err, "OK", NULL, NULL, 0); }
 }
 static void on_focus(lv_event_t *e) { home_sel = (int)(intptr_t)lv_event_get_user_data(e); }
 static void home_screen(lv_obj_t *scr) {
-    lv_obj_t *l = page(scr, "Homebrew Menu", apps_count ? "Y Netloader    X Settings    A Open" : "Y Netloader    X Settings");
+    lv_obj_t *l = page(scr, "Homebrew Menu", apps_count ? "+ App Store    Y Netloader    X Settings    A Open" : "+ App Store    Y Netloader    X Settings");
     for (int i = 0; i < ICONS; i++) { free((void *)icon[i].data); icon[i].data = 0; }
     for (int i = 0; i < apps_count; i++) {
         char t[140];
@@ -689,26 +816,14 @@ static void status_text(void) {
     char c[16]; clock_text(c, sizeof c, 0);
     if (clk && strcmp(lv_label_get_text(clk), c)) { lv_label_set_text(clk, c); if (c[0]) lv_obj_remove_flag(clk, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(clk, LV_OBJ_FLAG_HIDDEN); }
 }
-/* ---- the first start after a Wii U install: its apps go onto the pad (bundle.c), which takes flash its time. The
-   menu fades in as always, with this in place of the list; then the list. Nothing to press meanwhile. */
-static void setup_tick(void) { lv_timer_handler(); }   /* (between pieces: the spinner keeps turning) */
-static void setup_screen(lv_obj_t *scr) { busy(page(scr, "Homebrew Menu", ""), "Setting Up\xE2\x80\xA6", "Don't turn off the GamePad", NULL, NULL); }
-static void do_setup(void) {
-    bundle_apps(setup_tick);
-    M.setup = 0;
-    apps_scan();
-    home_sel = 0; focus_at[0] = 0; stack[0] = home_screen; depth = 0;
-    show();
-}
 void ui_start(int selected) {
     home_sel = selected < apps_count ? selected : 0;
     focus_at[0] = home_sel;
     apply_theme();
-    stack[0] = M.setup ? setup_screen : home_screen; depth = 0;
+    stack[0] = home_screen; depth = 0;
     sound_init(); lv_group_set_focus_cb(lv_group_get_default(), on_group_focus);
     wup_alert_sound = sound_note;
     show();
-    if (M.setup) defer(do_setup);
     sys_power(&M.power); status_text();
 }
 int ui_selected(void) { return home_sel; }
@@ -729,18 +844,19 @@ void ui_step(void) {
         if (here && on_kb && sel != kb_sel && sel != LV_BUTTONMATRIX_BUTTON_NONE) sound_click();   /* (not on arriving) */
         kb_sel = sel; on_kb = here;
     }
-    if (stack[depth] == erasing_screen) pressed &= ~WUP_B;   /* (no way back while it erases) */
+    if (stack[depth] == erasing_screen || (stack[depth] == st_app_screen && st_working)) pressed &= ~WUP_B;   /* (no way back while it erases) */
     if (stack[depth] == update_screen) {
         if (upd_state == UPD_INSTALLING || upd_state == UPD_CHECKING || upd_state == UPD_DONE) pressed &= ~WUP_B;
         if (upd_state == UPD_AVAILABLE && (pressed & WUP_A)) { pressed &= ~WUP_A; sound_click(); defer(upd_go); }
     }
-    if (stack[0] == setup_screen) pressed = 0;                /* (setting up: nothing to press) */
     if (stack[depth] == kb_screen && kb_obj) kb_buttons(pressed, &pressed);   /* the keyboard: B, Y, X, -, +, L and R type */
     if (pressed & WUP_B) {
         if (stack[depth] == netloader_screen) { wuplink_close(); nl_title = 0; }
         pop();
     } else if (!depth && (pressed & WUP_X)) push(settings_screen);
     else if (!depth && (pressed & WUP_Y)) push(netloader_screen);
+    else if (!depth && (pressed & WUP_PLUS)) store_open();
+    else if (stack[depth] == store_screen && st_loaded && (pressed & WUP_Y)) push(repos_screen);
     if (stack[depth] == netloader_screen) netloader_step();
     if (++ticks % 100 == 0) {
         sys_power(&M.power); status_text();

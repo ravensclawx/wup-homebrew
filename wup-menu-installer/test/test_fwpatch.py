@@ -5,7 +5,8 @@
 
 1. A stand-in for the console's drc_fw.bin: Product1's sections from the dump, in DRXUtil's format.
 2. fwpatch (built for the host) makes the installer's firmware; it must refuse damaged and other firmware.
-3. Its data must be the stock data with exactly the UART install's two patches (tools/mkflash.py) and the bundle.
+3. Its data must be the stock data with exactly the UART install's patches in LVC_ (tools/mkflash.py) and the bundle
+   (the kernel's and the menu's slots, tools/mkinstaller.py).
 4. EMU_FLASH_OUT: the dump as a Wii U install leaves it: the new firmware in Product2, the bank selector on it, the
    gap (0x10000-0xFFFFF) blank as on a pad that never had homebrew. Boot it in the emulator holding A."""
 import os, struct, subprocess, sys, zlib
@@ -42,7 +43,8 @@ def main():
     subprocess.run([paths.host_cc(), '-O2', '-Wall', '-Wextra', '-o', cli, os.path.join(HERE, 'fwpatch_cli.c'),
                     os.path.join(HERE, '..', 'source', 'fwpatch.c')], check=True)
     payload = os.path.join(out, 'payload.bin'); open(payload, 'wb').write(mkinstaller.build())
-    data = stock[mkflash.BANK1:mkflash.BANK1 + mkflash.FW_DATA_SIZE]
+    FW_DATA_SIZE = 0x2c8ea5                 # (IMG_ ends there: the last section)
+    data = stock[mkflash.BANK1:mkflash.BANK1 + FW_DATA_SIZE]
     orig = os.path.join(out, 'drc_fw.test.bin'); open(orig, 'wb').write(blob(data))
     def run(src):
         dst = os.path.join(out, 'drc_fw.patched.bin')
@@ -64,21 +66,13 @@ def main():
     f = bytearray(stock)
     for a, b in mkflash.patches(lambda x, n: bytes(f[x:x + n])):
         if mkflash.BANK1 <= a < mkflash.BANK1 + 0x400000: f[a:a + len(b)] = b
-    exp = bytes(f[mkflash.BANK1:mkflash.BANK1 + mkflash.FW_DATA_SIZE]).ljust(mkflash.BUNDLE_OFF, b'\xff') + mkflash.build_bundle()[:0]
-    bundle = d[mkflash.BUNDLE_OFF:]
-    assert d[:mkflash.BUNDLE_OFF] == exp, 'the firmware differs from stock + the two patches'
-    diff = [i for i in range(mkflash.FW_DATA_SIZE) if d[i] != data[i]]
+    exp = bytes(f[mkflash.BANK1:mkflash.BANK1 + FW_DATA_SIZE]).ljust(mkinstaller.BUNDLE_OFF, b'\xff')
+    assert d[:mkinstaller.BUNDLE_OFF] == exp, 'the firmware differs from stock + the early hook'
+    diff = [i for i in range(FW_DATA_SIZE) if d[i] != data[i]]
     print('changed in the firmware: %d bytes, %06x..%06x' % (len(diff), diff[0], diff[-1]))
-    assert bundle[:4] == b'CFW1' and bundle[0x2000:0x2004] == b'WMNU'
-    size, mcrc = struct.unpack_from('<II', bundle, 0x2004)
-    assert crc(bundle[0x3000:0x3000 + size]) == mcrc
-    at = (0x3000 + size + 0xfff) & ~0xfff                              # the apps the menu puts on the pad (menu/bundle.c)
-    assert bundle[at:at + 4] == b'WAPS'
-    for i in range(struct.unpack_from('<I', bundle, at + 4)[0]):
-        wid, ver, off, n, c = struct.unpack_from('<32s16sIII', bundle, at + 8 + 60 * i)
-        assert crc(bundle[off:off + n]) == c, wid
-        print('  bundled: %s %s (%d KB)' % (wid.rstrip(b'\0').decode(), ver.rstrip(b'\0').decode(), n >> 10))
-    print('bundle: loader %d bytes, menu %d KB: ok' % (len(bundle[:0x2000].rstrip(b'\xff')), size >> 10))
+    assert d[mkinstaller.BUNDLE_OFF:] == mkinstaller.bundle(), 'the bundle'
+    b = d[mkinstaller.BUNDLE_OFF:]
+    print('bundle: kernel %d KB, menu %d KB: ok' % (struct.unpack_from('<I', b, 4)[0] >> 10, struct.unpack_from('<I', b, mkinstaller.KB_MENU + 4)[0] >> 10))
     if len(sys.argv) > 2:
         emu = bytearray(stock)
         emu[0x10000:0x100000] = b'\xff' * (0x100000 - 0x10000)        # a pad that never had homebrew

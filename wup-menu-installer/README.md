@@ -9,9 +9,12 @@ bank and switches to it only once it is complete, so an update that fails leaves
 Needs a Wii U running [Aroma](https://aroma.foryour.cafe/) (or Tiramisu) and a GamePad with the console's last firmware
 (it reports `190c0117`, revision 7677; any console on system 5.5.x has it).
 
-1. Put `homebrew_menu_installer.wuhb` in `sd:/wiiu/apps/` and open it from the Wii U Menu.
-2. **Install**, then **A**. Keep the GamePad charging and close to the console; it takes a couple of minutes.
-3. Turn the GamePad off, then on while holding **A**: the Homebrew Menu. Without A it starts as always.
+1. **Had version 1?** Open the version 1 installer first and choose **Remove**, then continue here. Version 2 is a new
+   design (its own kernel) and starts from a GamePad with Nintendo's firmware.
+2. Put `homebrew_menu_installer.wuhb` in `sd:/wiiu/apps/` and open it from the Wii U Menu.
+3. **Install**, then **A**. Keep the GamePad charging and close to the console; it takes a couple of minutes.
+4. Turn the GamePad off, then on while holding **A**: the Homebrew Menu. The first start takes a few seconds longer.
+   Without A it starts as always.
 
 **Remove** puts the console's copy of the original firmware back the same way. Apps and settings on the GamePad stay
 (in flash the firmware never reads) and come back if you install again.
@@ -19,19 +22,19 @@ Needs a Wii U running [Aroma](https://aroma.foryour.cafe/) (or Tiramisu) and a G
 ## What it changes
 
 The console keeps a copy of Nintendo's GamePad firmware (`drc_fw.bin`, in the GamePad firmware title on the
-system memory). The installer reads it, checks that it is exactly the firmware the boot hook was made for (its version
-and the CRC-32 of the code), and adds three things (`source/fwpatch.c`):
+system memory). The installer reads it, checks that it is exactly the firmware the early hook was made for (its version
+and the CRC-32 of the code), and adds (`source/fwpatch.c`, its payload from wup-menu's `tools/mkinstaller.py`):
 
-- one 4-byte `bl` in the firmware's boot-app selection, redirected to the hook;
-- the hook (wup-menu's `boot/hook.S`, 156 bytes) over 160 bytes of unused debug strings;
-- the bundle after the firmware's last section: the loader, the Homebrew Menu, and App Store and Software Update
-  (the menu copies them onto the GamePad at its first start).
+- the early hook (wup-menu's `boot/early.c`) in two pieces over unused debug strings, and the branch to it at the very
+  start of the firmware: the same three changes a UART install makes;
+- the bundle after the firmware's last section: the kernel and the Homebrew Menu, as their own flash slots store them.
 
-Everything else is Nintendo's firmware as it was, byte for byte, version included. On a normal boot the hook loads the
-loader from the bundle in the bank that runs; the loader starts the menu when A is held (or autoboot is on) and
-otherwise returns at once to the stock boot. The menu keeps its settings in the free flash below the first
-firmware bank and its files (apps, their data) in the GamePad's spare copy of its language data, which the firmware
-never reads, as on a pad installed over UART (wup-menu: `docs/architecture.md`).
+Everything else is Nintendo's firmware as it was, byte for byte, version included. At power-on the early hook checks
+for A (or the menu's Autoboot): without it, Nintendo's firmware starts as if nothing were there. With it, the hook
+starts the kernel from the bundle; on that first start the kernel copies the kernel and the menu into their own slots
+in the free flash below the first firmware bank, then removes the bundle. From then on the GamePad is exactly as one
+installed over UART: the menu updates itself with Software Update, and keeps its files (apps, their data) in the
+GamePad's spare copy of its language data, which the firmware never reads (wup-menu: `docs/architecture.md`).
 
 ## Build
 
@@ -45,7 +48,7 @@ python3 art/make.py                  # the icon and splash screens (icon.png, tv
 ```
 
 It builds next to [wup-menu](../wup-menu) and [libwup](../libwup)
-(`../wup-menu`, `../libwup`; or `$WUPMENU`): the payload (the hook, the loader and the Homebrew Menu) comes from
+(`../wup-menu`, `../libwup`; or `$WUPMENU`): the payload (the early hook, the kernel and the Homebrew Menu) comes from
 wup-menu's `tools/mkinstaller.py`, so the installer always carries the menu of that checkout. The app is built with
 devkitPro's wut, libmocha and SDL2 in the same Docker image DRXUtil uses.
 

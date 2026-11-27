@@ -13,7 +13,7 @@ typedef struct {
     config_t cfg;                          /* saved settings (config.h) */
     int share_auth, share_pass_set;        /* file sharing: a password is required / one is set */
     char ip[20];                           /* the pad's address, "" while not connected */
-    int rssi, fs_ok, setup;
+    int rssi, fs_ok;
     power_t power;
     const char *firmware, *storage;        /* Settings > System */
 } menu_t;
@@ -34,9 +34,8 @@ extern const clock_zone_t clock_zones[]; extern const int clock_nzones;
 void clock_load(void), clock_network(int online), clock_set_zone(int i), clock_set_24h(int on);
 int menu_reset(void (*tick)(void));    /* erase all content and settings (0 = done); tick: between sectors */
 int clock_zone(void), clock_24h(void), clock_text(char *out, int n, int long_form);
-void sound_init(void), sound_click(void), sound_chime(void), sound_off(void), sound_note(int notice), sound_launch(void);   /* sound.c */
+void sound_init(void), sound_click(void), sound_off(void), sound_note(int notice);   /* sound.c */
 void menu_forget(void);                /* the saved Wi-Fi network: left and forgotten */
-int bundle_pending(void), bundle_apps(void (*tick)(void));   /* bundle.c: the Wii U install's apps onto the pad: are there any to put; put them */
 const char *menu_install_received(int run);       /* a .wup from the Netloader into /apps; run: and start it */
 void menu_refresh_info(void);              /* firmware and storage texts */
 

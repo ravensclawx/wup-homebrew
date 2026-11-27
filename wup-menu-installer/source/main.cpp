@@ -234,7 +234,7 @@ void Draw()
     }
     case DONE:
         Frame(nullptr, "Done");
-        if (installing) Statement("Installed", "Hold A while turning on the GamePad to open the Homebrew Menu");
+        if (installing) Statement("Installed", "Hold A while turning on the GamePad to open the Homebrew Menu. The first time takes a few seconds longer");
         else Statement("Removed", "The GamePad runs its original firmware");
         break;
     case FAILED:

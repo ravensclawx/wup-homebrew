@@ -26,14 +26,17 @@ themselves. Don't, and it starts Nintendo's firmware exactly as it always has.
   runs from its normal start.
 - **The whole pad.** Under wup-homebrew nothing of Nintendo's runs: apps get the CPU and about 1.8 MB of memory each,
   where they had a few hundred KB around Nintendo's firmware.
-- **Safe.** If the kernel or the menu in flash is not whole, A starts stock. Power off with the Power button, as on
-  stock.
+- **Safe.** If the kernel or the menu in flash is not whole, A starts stock. Hold the Power button a second to turn
+  it off, as on stock.
 
 ## Get it
 
-Version 2 is in development on the `v2` branch. Version 1 (the menu on top of Nintendo's firmware) installs from a
-Wii U with the [Homebrew Menu Installer](wup-menu-installer); the installer for version 2, which also upgrades a pad
-from version 1, comes with the release. Until then version 2 installs over UART or, on a pad running the Homebrew
+From a Wii U with [Aroma](https://aroma.foryour.cafe/): the **Homebrew Menu Installer** (`homebrew_menu_installer.wuhb`
+from the [releases](https://github.com/ravensclawx/wup-homebrew/releases)), which installs through the GamePad's own
+firmware update: no opening the pad. Steps: [wup-menu-installer](wup-menu-installer#use). **Had version 1?** Remove it
+with the version 1 installer first, then install version 2.
+
+After that, Settings > System > Software Update keeps it current. Also over UART or, on a pad running the Homebrew
 Menu, over Wi-Fi ([wup-menu/docs/install.md](wup-menu/docs/install.md)).
 
 ## What's here
@@ -42,8 +45,8 @@ Menu, over Wi-Fi ([wup-menu/docs/install.md](wup-menu/docs/install.md)).
 |---|---|
 | [`kernel`](kernel) | the wup-homebrew kernel: scheduler, the pad's drivers, the services apps use |
 | [`libwup`](libwup) | the SDK: the runtime every app is built on (C library, LVGL, threads, sockets, the pad's hardware), the `.wup` app format, and the tools to build, send and debug apps |
-| [`wup-menu`](wup-menu) | the early hook, the Homebrew Menu, App Store and Software Update, and the install tools (UART, Wi-Fi) |
-| [`wup-menu-installer`](wup-menu-installer) | the Homebrew Menu Installer: a Wii U app that installs through the GamePad's own firmware update (version 1; version 2 to come) |
+| [`wup-menu`](wup-menu) | the early hook, the Homebrew Menu (with its App Store and Software Update), and the install tools (UART, Wi-Fi) |
+| [`wup-menu-installer`](wup-menu-installer) | the Homebrew Menu Installer: a Wii U app that installs through the GamePad's own firmware update |
 | [`wup-emu`](wup-emu) | the GamePad emulator, running the real boot ROM and flash of your own pad |
 
 ## Apps

@@ -20,6 +20,9 @@ static int fs_state, screen_on, lcd8_saved, ret;
 static u32 lcd8[3];
 void wup__kernel_exit(void);
 void wup__time_start(void), wup__time_end(void);
+#ifdef WUP_LARGE
+void wup__large_wb(int on);
+#endif
 static void copy_boot(void);
 static int stage_exec(void);
 static char exec_path[96];
@@ -57,8 +60,18 @@ static void app_main(void) {
     int formatted = 0;
     fs_state = fs_mount(&formatted) == 0;              /* built with FS_NO_FORMAT: never formats */
     wup__time_start();
+    {                                                  /* C++: the static objects' constructors (.init_array) */
+        extern void (*__init_array_start[])(void), (*__init_array_end[])(void);
+        for (void (**f)(void) = __init_array_start; f < __init_array_end; f++) (*f)();
+    }
+#ifdef WUP_LARGE
+    wup__large_wb(1);                                  /* (its memory write-back: malloc_large.c) */
+#endif
     if (!setjmp(exit_jb)) { fade_t0 = HWCLK; ret = main(); }   /* (exit() and abort() come back here; the fade's 0.3 s
                                                        count from here: mounting a fresh filesystem can take longer) */
+#ifdef WUP_LARGE
+    wup__large_wb(0);                                  /* (the memory as the kernel maps it, before anything else) */
+#endif
     wup__time_end();
     wup_audio_close();
     if (wup__net_exit) wup__net_exit();                /* sockets closed, lwIP's threads stopped, the radio's frames dropped

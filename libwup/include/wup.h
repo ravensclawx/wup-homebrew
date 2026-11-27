@@ -59,6 +59,8 @@ uint8_t *wup_screen8(void);
 uint32_t wup_stride8(void);
 void wup_palette(int index, uint32_t rgb);           /* 0xRRGGBB */
 void wup_present8(int y, int h);                     /* show rows y..y+h (cache clean) */
+void wup_large_take_screen_rest(void);               /* large apps on the 8-bit screen: the rest of screen 1 (404 KB)
+                                                        to the heap (malloc_large.c); RGB565 drawing on screen then gone */
 void wup_vblank(void);                               /* wait for the vertical blanking interval */
 
 /* input */

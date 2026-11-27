@@ -11,6 +11,7 @@
 
 extern "C" void wup_log(const char *);
 
+namespace std { const nothrow_t nothrow{}; }           /* (new (std::nothrow): the object libc++abi would hold) */
 static void *alloc(std::size_t n) {
     void *p = std::malloc(n ? n : 1);
     if (!p) { wup_log("c++: out of memory (new)\n"); std::abort(); }

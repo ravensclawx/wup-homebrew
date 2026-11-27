@@ -70,8 +70,16 @@ static void rect_copy(px_t *to, const px_t *from, int x, int y, int w, int h) {
 extern int wup__video_on;                                 /* (video.c: the screens are the decoder's) */
 static void flip(int x, int y, int w, int h) {
     if (wup__video_on) return;
+#ifdef WUP_LARGE
+    /* one screen, shown all along: nothing to switch (screen_show waits for a refresh: each frame of a game waited for
+       two). Screen 1 is write-through: what was drawn is in RAM once the write buffer drains. */
+    (void)w; (void)h;
+    dclean(scr_back, 0);                                  /* (n = 0: the write buffer drained, alone) */
+    if (WUPK->screen_shown() != scr_back) WUPK->screen_show(scr_back);
+#else
     if (w > 0 && h > 0) dclean(scr_back + y * GFX_W, (u32)h * GFX_W * 2);   /* (the rows presented) */
     WUPK->screen_show(scr_back);
+#endif
 #ifndef WUP_LARGE                                         /* (one screen: nothing to swap or carry over) */
     px_t *t = scr_front; scr_front = scr_back; scr_back = t;
     if (tgt == scr_front) tgt = scr_back;

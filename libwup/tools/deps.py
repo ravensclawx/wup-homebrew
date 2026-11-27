@@ -30,6 +30,11 @@ DEPS = {   # name: (folder, git URL, tag/branch, license[, folders: a sparse che
     'doomgeneric': (os.path.join(paths.THIRD, 'doomgeneric'), 'https://github.com/ozkl/doomgeneric.git', 'e257a09527062bfb986b6e5e0780839b6cbd5b71', 'GPL-2.0'),
     'chocolate-doom': (os.path.join(paths.THIRD, 'chocolate-doom'), 'https://github.com/chocolate-doom/chocolate-doom.git', 'chocolate-doom-3.1.0', 'GPL-2.0', ['opl', 'src']),
     'emu8950': (os.path.join(paths.THIRD, 'emu8950'), 'https://github.com/digital-sound-antiques/emu8950.git', '1.2.4', 'MIT'),
+    # wup-retroarch (its own repository): RetroArch, and its first core, Gambatte (Game Boy / Color)
+    'retroarch': (os.path.join(paths.THIRD, 'retroarch'), 'https://github.com/libretro/RetroArch.git', 'v1.19.1', 'GPL-3.0-or-later'),
+    'gambatte': (os.path.join(paths.THIRD, 'gambatte'), 'https://github.com/libretro/gambatte-libretro.git', '138bcbbf311300a271896bf93a76370c72cab339', 'GPL-2.0'),
+    'quicknes': (os.path.join(paths.THIRD, 'quicknes'), 'https://github.com/libretro/QuickNES_Core.git', '26bb785c9deddb66a17717b21bb4e328f03ade32', 'LGPL-2.1-or-later'),
+    'libretro-core-info': (os.path.join(paths.THIRD, 'libretro-core-info'), 'https://github.com/libretro/libretro-core-info.git', 'eac3a2784d428444aa2bd472039b5c5540141af1', 'MIT'),
     'compiler-rt': (os.path.join(paths.THIRD, 'llvm'), 'https://github.com/llvm/llvm-project.git', 'llvmorg-19.1.7', 'Apache-2.0 WITH LLVM-exception', ['compiler-rt/lib/builtins']),
 }
 

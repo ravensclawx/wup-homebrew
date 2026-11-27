@@ -72,6 +72,25 @@ int open(const char *path, int flags, ...) {
     files[i].used = 1;
     return FD_FILES + i;
 }
+int ftruncate(int fd, off_t len) {                       /* (a file shortened or lengthened: littlefs's own) */
+    lfs_file_t *f = file(fd); if (!f) return -1;
+    int r = lfs_file_truncate(&fs_lfs, f, (lfs_off_t)len);
+    return r ? lfs_fail(r) : 0;
+}
+int fsync(int fd) {                                       /* (what was written, kept: littlefs commits a file's
+                                                             contents at its sync or close) */
+    lfs_file_t *f = file(fd); if (!f) return -1;
+    int r = lfs_file_sync(&fs_lfs, f);
+    return r ? lfs_fail(r) : 0;
+}
+long sysconf(int name) {                                  /* (what is asked of it: the page size, one processor) */
+    switch (name) {
+    case _SC_PAGESIZE: return 4096;
+    case _SC_NPROCESSORS_CONF: case _SC_NPROCESSORS_ONLN: return 1;
+    case _SC_CLK_TCK: return 1000;
+    default: errno = EINVAL; return -1;
+    }
+}
 int close(int fd) {
     if (fd < FD_FILES) { if (wup__sock_close) return wup__sock_close(fd); errno = EBADF; return -1; }
     lfs_file_t *f = file(fd); if (!f) return -1;

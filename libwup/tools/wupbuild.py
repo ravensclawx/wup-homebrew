@@ -16,7 +16,9 @@ large (yes: screen 0, and with the 8-bit screen the rest of screen 1, as heap: s
 float or double: picolibc's printf family). Shared libraries (include/dlfcn.h): shared (yes: the folder builds a library,
 <name>.so, ARM, for an app built with dl; its imports listed in libwup/build/apps/<name>/imports.txt), dl (yes: the app
 loads libraries: dlopen, and a table of what it exports to them), dl_exports (more symbols for its libraries: names, or
-@files of them, e.g. a library's imports.txt).
+@files of them, e.g. a library's imports.txt), libraries (folders of its libraries, built first: each is kept as
+libwup/build/apps/<name>/<name>.so). files (for its package, wup-menu/tools/mkrepo.py: data beside the app, or
+/path/on/the/pad=file).
 SRC: .c files or directories (all their .c files). The app defines WUP_APP("Title") and main().
 An app is one image linked at WUP_APP_BASE (0x80000, include/wup_ram.h): code, constants and data, then its .bss;
 the rest of the app's block, to WUP_APP_END (0x253000), is its heap. Code is ARM (faster than Thumb on the ARM926;
@@ -211,6 +213,8 @@ def build_app(d):
         deps.fetch(dep)
     if cfg.get('prebuild'):                                  # generated sources (before the globs too)
         subprocess.run([sys.executable, os.path.join(d, cfg['prebuild'])], check=True, cwd=d)
+    for lib in cfg.get('libraries', '').split():             # its libraries first (shared = yes folders): their
+        build_app(os.path.join(d, lib))                      # imports.txt is what its dl_exports names
     srcs = sum((sorted(glob.glob(os.path.join(d, x))) for x in cfg['sources'].split() if not x.startswith('!')), []) \
         if 'sources' in cfg else sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith('.c'))
     drop = set(sum((glob.glob(os.path.join(d, x[1:])) for x in cfg.get('sources', '').split() if x.startswith('!')), []))

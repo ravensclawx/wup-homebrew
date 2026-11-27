@@ -697,12 +697,13 @@ static void on_st_app(lv_event_t *e) { st_pick = (int)(intptr_t)lv_event_get_use
 
 static int repo_pick;
 static void repo_remove_go(void) { catalog_repo_remove(repo_pick); st_loaded = 0; show(); }
-static void on_repo(lv_event_t *e) {
-    repo_pick = (int)(intptr_t)lv_event_get_user_data(e);
-    if (repo_pick == 0) return;                        /* (the project's own stays) */
-    char t[96]; snprintf(t, sizeof t, "Remove \"%s\"", catalog_repo_name(repo_pick));
+static void repo_remove(int i) {                    /* asked first; the project's own stays */
+    if (i <= 0 || i >= catalog_repos()) return;
+    repo_pick = i;
+    char t[96]; snprintf(t, sizeof t, "Remove \"%s\"?", catalog_repo_name(repo_pick));
     wup_alert(t, "Its apps no longer show in the App Store. Apps already installed stay.", "Remove", "Cancel", repo_remove_go, 1);
 }
+static void on_repo(lv_event_t *e) { repo_remove((int)(intptr_t)lv_event_get_user_data(e)); }
 static void repo_add_done(void) {
     int r = catalog_repo_add(kb_text);
     memset(kb_text, 0, sizeof kb_text);
@@ -713,7 +714,7 @@ static void repo_add_done(void) {
 }
 static void on_repo_add(lv_event_t *e) { (void)e; ask_text("Enter the repository's address", "https://", 4, 150, 0, repo_add_done); }
 static void repos_screen(lv_obj_t *scr) {
-    lv_obj_t *l = page(scr, "Repositories", "B Back    A Select");
+    lv_obj_t *l = page(scr, "Repositories", catalog_repos() > 1 ? "B Back    X Remove    A Select" : "B Back    A Select");
     for (int i = 0; i < catalog_repos(); i++)
         row(l, WUP_SYMBOL_GLOBE, catalog_repo_name(i), i == 0 ? "Built In" : (catalog_repo_failed >> i & 1) ? "Not Reachable" : NULL, on_repo, (void *)(intptr_t)i);
     row(l, LV_SYMBOL_PLUS, "Add Repository\xE2\x80\xA6", NULL, on_repo_add, NULL);
@@ -857,6 +858,7 @@ void ui_step(void) {
     else if (!depth && (pressed & WUP_Y)) push(netloader_screen);
     else if (!depth && (pressed & WUP_PLUS)) store_open();
     else if (stack[depth] == store_screen && st_loaded && (pressed & WUP_Y)) push(repos_screen);
+    else if (stack[depth] == repos_screen && (pressed & WUP_X)) repo_remove(focused_index());   /* (the rows: the repositories first) */
     if (stack[depth] == netloader_screen) netloader_step();
     if (++ticks % 100 == 0) {
         sys_power(&M.power); status_text();

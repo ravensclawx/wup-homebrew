@@ -10,7 +10,7 @@
 #include "wup_https.h"
 
 #ifndef CATALOG_URL
-#define CATALOG_URL "https://ravensclawx.github.io/wup-homebrew-apps"
+#define CATALOG_URL "https://ravensclawx.github.io/wup-homebrew-apps/v2"   /* (version 1 reads the folder above) */
 #endif
 
 typedef struct {

@@ -24,6 +24,7 @@ DEPS = {   # name: (folder, git URL, tag/branch, license[, folders: a sparse che
     # large apps' malloc (app.cfg large = yes): a heap of several pools (src/malloc_large.c)
     'tlsf': (os.path.join(paths.THIRD, 'tlsf'), 'https://github.com/mattconte/tlsf.git', 'deff9ab509341f264addbd3c8ada533678591905', 'BSD-3-Clause'),
     'uzlib': (os.path.join(paths.THIRD, 'uzlib'), 'https://github.com/pfalcon/uzlib.git', 'v2.9.5', 'Zlib'),
+    'zlib': (os.path.join(paths.THIRD, 'zlib'), 'https://github.com/madler/zlib.git', 'v1.3.1', 'Zlib'),
     # WUP Boy (its own repository, github.com/ravensclawx/wup-boy): the emulator core and its sound (examples/sdl2/minigb_apu: no SDL in it)
     'peanut-gb': (os.path.join(paths.THIRD, 'peanut-gb'), 'https://github.com/deltabeard/Peanut-GB.git', '33f053b9e70297ff0bab53da527c19126384d911', 'MIT'),
     # wup-doom (its own repository): the engine, Chocolate Doom's OPL music player, and the OPL2 (YM3812) emulator for it

@@ -22,6 +22,10 @@ DEPS = {   # name: (folder, git URL, tag/branch, license[, folders: a sparse che
     'jsmn': (os.path.join(paths.THIRD, 'jsmn'), 'https://github.com/zserge/jsmn.git', 'v1.1.0', 'MIT'),
     # WUP Boy (its own repository, github.com/ravensclawx/wup-boy): the emulator core and its sound (examples/sdl2/minigb_apu: no SDL in it)
     'peanut-gb': (os.path.join(paths.THIRD, 'peanut-gb'), 'https://github.com/deltabeard/Peanut-GB.git', '33f053b9e70297ff0bab53da527c19126384d911', 'MIT'),
+    # wup-doom (its own repository): the engine, Chocolate Doom's OPL music player, and the OPL2 (YM3812) emulator for it
+    'doomgeneric': (os.path.join(paths.THIRD, 'doomgeneric'), 'https://github.com/ozkl/doomgeneric.git', 'e257a09527062bfb986b6e5e0780839b6cbd5b71', 'GPL-2.0'),
+    'chocolate-doom': (os.path.join(paths.THIRD, 'chocolate-doom'), 'https://github.com/chocolate-doom/chocolate-doom.git', 'chocolate-doom-3.1.0', 'GPL-2.0', ['opl', 'src']),
+    'emu8950': (os.path.join(paths.THIRD, 'emu8950'), 'https://github.com/digital-sound-antiques/emu8950.git', '1.2.4', 'MIT'),
     'compiler-rt': (os.path.join(paths.THIRD, 'llvm'), 'https://github.com/llvm/llvm-project.git', 'llvmorg-19.1.7', 'Apache-2.0 WITH LLVM-exception', ['compiler-rt/lib/builtins']),
 }
 

@@ -1,7 +1,7 @@
 /* catalog: the apps the App Store offers, from repositories in the format of the Homebrew App Store's libget
  * (github.com/fortheusers/libget): <repo>/repo.json lists the packages, each a zip at <repo>/zips/<name>.zip (with its
  * MD5 in repo.json) holding the files to put on the pad, its icon at <repo>/packages/<name>/icon.png. The project's
- * own repository (CATALOG_URL) is always there; the person adds others (their addresses in /.get/repos.txt, one a
+ * own repository (CATALOG_URL) is there to start with; the person adds others (their addresses in /.get/repos.txt, one a
  * line). The list is all of them together, each app with the repository it comes from. What is installed is kept as
  * libget keeps it: /.get/packages/<name>/info.json ({"version": ...}) and manifest.install ("U: <path>" per file).
  * Also the downloading and unzipping that Software Update shares (release.c). */
@@ -21,13 +21,14 @@ typedef struct {
     uint8_t repo;                /* which repository (catalog_repo) */
 } catalog_pkg;
 
-/* repositories: 0 is the project's own (CATALOG_URL), then the ones added (/.get/repos.txt) */
+/* repositories: the project's own (CATALOG_URL) on a new pad, then as the person adds and removes them, the
+   project's own too (/.get/repos.txt, one address a line) */
 #define REPO_MAX 8
 int catalog_repos(void);                                  /* how many (read from the file the first time) */
 const char *catalog_repo(int i);                          /* its address, without a trailing slash */
 const char *catalog_repo_name(int i);                     /* its host, for showing ("ravensclawx.github.io") */
 int catalog_repo_add(const char *url);                    /* 0, or < 0: not an https:// address, there already, or full */
-void catalog_repo_remove(int i);                          /* (not 0) */
+void catalog_repo_remove(int i);
 extern int catalog_repo_failed;                           /* after catalog_load: a bit per repository that could not be read */
 
 #define CATALOG_MAX 64

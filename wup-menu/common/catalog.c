@@ -96,7 +96,7 @@ int catalog_download(const char *url, uint32_t size_kb, void (*progress)(int)) {
 
 /* ---- the repositories */
 static char repos[REPO_MAX][160], names[REPO_MAX][64];
-static int nrepos;
+static int nrepos, loaded;
 #define REPOS_FILE "/.get/repos.txt"
 static void tidy(char *u) {                           /* no trailing slash, no repo.json */
     size_t n = strlen(u);
@@ -110,15 +110,17 @@ static void name_of(int i) {
 }
 static void repos_save(void) {
     char t[REPO_MAX * 162]; size_t n = 0;
-    for (int i = 1; i < nrepos; i++) n += (size_t)snprintf(t + n, sizeof t - n, "%s\n", repos[i]);
+    for (int i = 0; i < nrepos; i++) n += (size_t)snprintf(t + n, sizeof t - n, "%s\n", repos[i]);
+    if (!n) t[n++] = '\n';                             /* (none: the file says so; no file is the project's own alone) */
     lfs_mkdir(&fs_lfs, "/.get");
-    if (n) fs_write(REPOS_FILE, t, (uint32_t)n); else fs_remove(REPOS_FILE);
+    fs_write(REPOS_FILE, t, (uint32_t)n);
 }
 int catalog_repos(void) {
-    if (nrepos) return nrepos;
-    snprintf(repos[0], sizeof repos[0], "%s", CATALOG_URL); tidy(repos[0]); name_of(0); nrepos = 1;
+    if (loaded) return nrepos;
+    loaded = 1; nrepos = 0;
     char t[REPO_MAX * 162]; int n = fs_read(REPOS_FILE, 0, t, sizeof t - 1);
-    if (n > 0) {
+    if (n < 0) { snprintf(repos[0], sizeof repos[0], "%s", CATALOG_URL); tidy(repos[0]); name_of(0); nrepos = 1; }   /* (a new pad) */
+    else if (n > 0) {
         t[n] = 0;
         for (char *l = strtok(t, "\n"); l && nrepos < REPO_MAX; l = strtok(0, "\n")) {
             if (strncmp(l, "https://", 8)) continue;
@@ -127,8 +129,8 @@ int catalog_repos(void) {
     }
     return nrepos;
 }
-const char *catalog_repo(int i) { catalog_repos(); return i >= 0 && i < nrepos ? repos[i] : repos[0]; }
-const char *catalog_repo_name(int i) { catalog_repos(); return i >= 0 && i < nrepos ? names[i] : names[0]; }
+const char *catalog_repo(int i) { catalog_repos(); return i >= 0 && i < nrepos ? repos[i] : ""; }
+const char *catalog_repo_name(int i) { catalog_repos(); return i >= 0 && i < nrepos ? names[i] : ""; }
 int catalog_repo_add(const char *url) {
     catalog_repos();
     char u[160];
@@ -145,7 +147,7 @@ int catalog_repo_add(const char *url) {
 }
 void catalog_repo_remove(int i) {
     catalog_repos();
-    if (i <= 0 || i >= nrepos) return;
+    if (i < 0 || i >= nrepos) return;
     for (int k = i; k < nrepos - 1; k++) { memcpy(repos[k], repos[k + 1], sizeof repos[0]); memcpy(names[k], names[k + 1], sizeof names[0]); }
     nrepos--;
     repos_save();
@@ -223,6 +225,7 @@ int catalog_load(void) {
     return preview_load();
 #endif
     catalog_count = 0; catalog_repo_failed = 0;
+    if (!catalog_repos()) return 0;                    /* (none: no apps, nothing to fail) */
     int ok = 0, last = CATALOG_ENET;
     for (int i = 0; i < catalog_repos(); i++) {
         int r = load_one(i);

@@ -59,6 +59,7 @@ int open(const char *path, int flags, ...) {
     if (!wup_fs_ok()) { errno = EIO; return -1; }
     while (i < NFILES && files[i].used) i++;
     if (i == NFILES) { errno = EMFILE; return -1; }
+    if (acc != O_RDONLY) fs__used_refresh();          /* (a write: fs.c erases what is free 64 KB at a time) */
     lf = (acc == O_RDONLY ? LFS_O_RDONLY : acc == O_WRONLY ? LFS_O_WRONLY : LFS_O_RDWR) | (flags & O_CREAT ? LFS_O_CREAT : 0)
        | (flags & O_TRUNC ? LFS_O_TRUNC : 0) | (flags & O_APPEND ? LFS_O_APPEND : 0) | (flags & O_EXCL ? LFS_O_EXCL : 0);
     int r = lfs_file_open(&fs_lfs, &files[i].f, full(path, b, sizeof b), lf);

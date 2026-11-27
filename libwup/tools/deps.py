@@ -21,6 +21,8 @@ DEPS = {   # name: (folder, git URL, tag/branch, license[, folders: a sparse che
     'picohttpparser': (os.path.join(paths.THIRD, 'picohttpparser'), 'https://github.com/h2o/picohttpparser.git', 'dd573d8fa9264c646a400e96ce9f07dea6f156e4', 'MIT or Perl'),
     'jsmn': (os.path.join(paths.THIRD, 'jsmn'), 'https://github.com/zserge/jsmn.git', 'v1.1.0', 'MIT'),
     # inflate a piece at a time, with a 32 KB window: the App Store's large files (a game's data)
+    # large apps' malloc (app.cfg large = yes): a heap of several pools (src/malloc_large.c)
+    'tlsf': (os.path.join(paths.THIRD, 'tlsf'), 'https://github.com/mattconte/tlsf.git', 'deff9ab509341f264addbd3c8ada533678591905', 'BSD-3-Clause'),
     'uzlib': (os.path.join(paths.THIRD, 'uzlib'), 'https://github.com/pfalcon/uzlib.git', 'v2.9.5', 'Zlib'),
     # WUP Boy (its own repository, github.com/ravensclawx/wup-boy): the emulator core and its sound (examples/sdl2/minigb_apu: no SDL in it)
     'peanut-gb': (os.path.join(paths.THIRD, 'peanut-gb'), 'https://github.com/deltabeard/Peanut-GB.git', '33f053b9e70297ff0bab53da527c19126384d911', 'MIT'),

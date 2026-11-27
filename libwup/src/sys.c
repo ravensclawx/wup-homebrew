@@ -19,7 +19,12 @@ void *sbrk(ptrdiff_t n) {
     void *p = (void *)brk_; brk_ += (uintptr_t)n;
     return p;
 }
+#ifdef WUP_LARGE
+size_t wup__large_free(void);                         /* (malloc_large.c: the heap is TLSF's, over two pools) */
+size_t wup_mem_free(void) { return wup__large_free(); }
+#else
 size_t wup_mem_free(void) { return WUP_APP_END - (brk_ ? brk_ : (((uintptr_t)__bss_end + 31) & ~(uintptr_t)31)); }
+#endif
 
 /* ---- stdout and stderr: the log (the UART, and UDP port 28803 with networking up), a line at a time */
 static int log_put(char c, FILE *f) {

@@ -44,6 +44,11 @@ static void app_main(void) {
        then faded in (fade_in_now) */
     gfx_brightness(0);
     fade_pending = 1; gfx_present_hook = fade_in_now;
+#ifdef WUP_LARGE                                     /* screen 1, black, at once: screen 0 is about to be the heap, and
+                                                        whatever the screen holds is faded in after 0.3 s */
+    memset((void *)WUP_FB1, 0, WUP_FB_SIZE); cache_clean((void *)WUP_FB1, WUP_FB_SIZE);
+    WUPK->vblank_wait(); WUPK->screen_show((const void *)WUP_FB1);
+#endif
     copy_boot();
     for (int i = 0; i < 4; i++) {                      /* the sticks at rest: each pad's are a little off centre */
         int v = (int)(REPORT[6 + 2 * i] | REPORT[7 + 2 * i] << 8) - 0x800;

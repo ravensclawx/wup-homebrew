@@ -22,10 +22,19 @@
 #include "handoff.h"
 
 #include "wup_ram.h"
+#ifdef __cplusplus                                   /* (C++ apps: these are C) */
+extern "C" {
+#endif
+
 #define WUP_APP_SIZE      (WUP_APP_END - WUP_APP_BASE)
 
+#ifdef __cplusplus
+#define WUP_C_ "C"
+#else
+#define WUP_C_
+#endif
 #define WUP_APP(title) \
-    int _wup_entry(void); \
+    extern WUP_C_ int _wup_entry(void); \
     __attribute__((section(".header"), used)) const struct { uint32_t magic, entry, size; char name[32]; \
                                                              uint32_t reserved[3]; } \
     _wup_header = { 0x57524248u, (uint32_t)_wup_entry, 0, title, { 0, 0, 0 } }   /* (size: wupbuild.py) */
@@ -178,3 +187,7 @@ void wup_net_time(void);                             /* the date and time from t
 void wup_net_tx_pacing(unsigned frames_per_ms_x10, unsigned burst);   /* (diagnostics) */                 /* "rx=... rx_dropped=... pool_err=..." (diagnostics) */
 extern void (*wup__net_poll)(void), (*wup__net_exit)(void), (*wup__net_log)(const char *);   /* (libwup internal) */
 extern int (*wup__sock_close)(int fd);
+
+#ifdef __cplusplus
+}
+#endif

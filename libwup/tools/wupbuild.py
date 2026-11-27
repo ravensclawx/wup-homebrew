@@ -8,7 +8,7 @@
 app.cfg: key = value lines: name, author, version, description, icon (64x64 PNG; optional), sources (space separated,
 relative to the folder, globs allowed, '!pattern' leaves files out, indented lines continue), include (folders),
 defines, cflags (extra compiler flags), prebuild (a Python script in the folder run first, for generated sources;
-.s/.S sources are assembled), thumb (yes/no), thumb_sources (these as Thumb -Os: smaller), deps (tools/deps.py names),
+.s/.S sources are assembled, .cpp ones are C++17 without exceptions or RTTI), thumb (yes/no), thumb_sources (these as Thumb -Os: smaller), deps (tools/deps.py names),
 net (yes: sockets; raw: lwIP's callback API, see include/wup.h), lvgl (yes: the GUI library, include/wup_lvgl.h), kit
 (yes: the Homebrew Menu's look for apps, include/wup_kit.h; brings lvgl), system (yes: the menu and Software Update:
 the filesystem may be formatted, the flash slots written), https (yes: wup_https.h, BearSSL; with net = yes).
@@ -26,10 +26,10 @@ NM = paths.NM
 LIB = ([os.path.join(paths.SRC, f) for f in ('wup.c', 'sys.c', 'kernel.c', 'pthread.c', 'time.c', 'atomic.c', 'gfx.c', 'fonts.c', 'wup_hw.c', 'fs.c', 'video.c', 'mem.S')]
        + [os.path.join(paths.THIRD, 'littlefs', f) for f in ('lfs.c', 'lfs_util.c')])
 OBJCOPY = paths.OBJCOPY
-IGNORED = ('large', 'screen8', 'text_in_big', 'text_in_app')   # (v1's memory layouts: one layout now)
+IGNORED = ('screen8', 'text_in_big', 'text_in_app')   # (v1's memory layouts)
 
 
-def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, thumb_srcs=(), cflags=(), gui=False, system=False, https=False):
+def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, thumb_srcs=(), cflags=(), gui=False, system=False, https=False, large=False):
     """-> the app image"""
     subprocess.run([sys.executable, os.path.join(HERE, 'mkfont_aa.py')], check=True, stdout=subprocess.DEVNULL)
     import sdk; sdk.ensure()
@@ -54,6 +54,11 @@ def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, thumb_srcs=
         import lvgl; lvgl.ensure()
         lib += [os.path.join(paths.SRC, 'lvgl.c'), os.path.join(paths.SRC, 'alert.c')]
         flags += lvgl.flags(); extra_libs = [lvgl.LIB]
+    if large:                                # (app.cfg large = yes: screen 0 is the heap too, src/malloc_large.c)
+        if gui: sys.exit('large = yes is not for LVGL apps (they draw on both screens)')
+        deps.fetch('tlsf')
+        lib += [os.path.join(paths.SRC, 'malloc_large.c'), os.path.join(paths.THIRD, 'tlsf', 'tlsf.c')]
+        flags += ['-DWUP_LARGE']
     if system: lib += [os.path.join(paths.SRC, 'menu_slot.c')]   # (wup_system.h: the menu and Software Update only)
     if https:                                # HTTPS (wup_https.h): BearSSL, built once (tools/bearssl.py), and picohttpparser
         if net is not True: sys.exit('https = yes needs net = yes')
@@ -61,6 +66,11 @@ def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, thumb_srcs=
         php = deps.DEPS['picohttpparser'][0]
         lib += [os.path.join(paths.SRC, 'https.c'), os.path.join(php, 'picohttpparser.c')]
         flags += bearssl.flags() + ['-I', php]; extra_libs = extra_libs + [bearssl.LIB]
+    cxx = any(x.endswith(('.cpp', '.cc')) for x in srcs)
+    if cxx: lib += [os.path.join(paths.SRC, 'cxx.cpp')]     # (C++: the runtime's pieces, src/cxx.cpp)
+    libcxx = os.path.normpath(os.path.join(res, '..', '..', '..', 'include', 'c++', 'v1'))   # (the compiler's own headers)
+    cxxflags = ['-std=c++17', '-fno-exceptions', '-fno-rtti', '-fno-threadsafe-statics', '-nostdinc++',
+                '-isystem', os.path.join(paths.CONFIG, 'c++'), '-isystem', libcxx]
     bdir = paths.out('apps', name.replace(' ', '_').lower())
     objs = []
     for s in lib + srcs:
@@ -70,7 +80,9 @@ def build(srcs, name, out, incs=(), defs=(), thumb=False, net=False, thumb_srcs=
         f = flags + (['-Wno-everything'] if third else [])
         if s in thumb_srcs: f = [x if x != '-marm' else '-mthumb' for x in f] + ['-Os']   # size over speed
         if s.endswith(('.s', '.S')): f = [x for x in f if x not in ('-nostdlib',)]
-        r = subprocess.run(['clang'] + f + ['-c', s, '-o', o], capture_output=True, text=True)
+        is_cxx = s.endswith(('.cpp', '.cc'))
+        if is_cxx: f = cxxflags + f
+        r = subprocess.run(['clang++' if is_cxx else 'clang'] + f + ['-c', s, '-o', o], capture_output=True, text=True)
         if r.returncode: sys.exit('compile %s failed:\n%s' % (s, r.stderr[-4000:]))
         if r.stderr.strip() and not is_lib and not third: print(r.stderr.strip()[-2000:])
         objs.append(o)
@@ -142,7 +154,7 @@ def build_app(d):
     code = build(srcs, name, None, [os.path.join(d, x) for x in cfg.get('include', '').split()], cfg.get('defines', '').split(),
                  cfg.get('thumb', 'no') == 'yes', {'yes': True, 'raw': 'raw'}.get(cfg.get('net', 'no'), False), thumb_srcs,
                  cfg.get('cflags', '').split(), kit or cfg.get('lvgl', 'no') == 'yes', cfg.get('system', 'no') == 'yes',
-                 cfg.get('https', 'no') == 'yes')
+                 cfg.get('https', 'no') == 'yes', cfg.get('large', 'no') == 'yes')
     icon = os.path.join(d, cfg['icon']) if cfg.get('icon') else None
     author, version = cfg.get('author', ''), cfg.get('version', '1.0')
     description = cfg.get('description', '')

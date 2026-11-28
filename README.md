@@ -53,8 +53,6 @@ Menu, over Wi-Fi ([wup-menu/docs/install.md](wup-menu/docs/install.md)).
 
 Apps come to the GamePad through the App Store, from any repositories you add, or over File Sharing (FTP):
 
-- [WUP Stream](https://github.com/ravensclawx/wup-stream) (from its repository for now: not in the App Store): the
-  GamePad as a wireless screen and controller for your computer: picture, sound, every input, the microphone and the camera.
 - [RetroArch](https://github.com/ravensclawx/wup-retroarch): RetroArch 1.19.1 with its menu, and its cores loaded as
   it runs: Gambatte (Game Boy, Game Boy Color) and QuickNES (NES).
 - [Doom](https://github.com/ravensclawx/wup-doom): the shareware episode, with the original OPL music.
